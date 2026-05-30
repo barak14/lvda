@@ -224,9 +224,47 @@ static const struct drm_mode_config_helper_funcs lvda_mode_config_helpers = {
 
 DEFINE_DRM_GEM_FOPS(lvda_fops);
 
+/*
+ * Align the dumb-buffer scanout pitch to 256 bytes. The shmem helper defaults
+ * the pitch to width * cpp, which is only as aligned as the width itself. A
+ * streaming host imports the scanned-out framebuffer as a dma-buf and feeds it
+ * to a GPU video encoder; those importers (e.g. amdgpu) require a 256-byte
+ * pitch. Without this a width not divisible by 64 (e.g. 2400 -> pitch 9600)
+ * yields a buffer the encoder rejects, so capture produces no frames.
+ */
+#define LVDA_FB_PITCH_ALIGN 256u
+
+static int lvda_dumb_create(struct drm_file *file, struct drm_device *drm,
+			    struct drm_mode_create_dumb *args)
+{
+	u32 min_pitch = DIV_ROUND_UP(args->width * args->bpp, 8);
+	struct drm_gem_shmem_object *shmem;
+	u32 handle;
+	int ret;
+
+	args->pitch = ALIGN(min_pitch, LVDA_FB_PITCH_ALIGN);
+	args->size = (u64)args->pitch * args->height;
+
+	/* Allocate the object at the aligned pitch directly: the shmem dumb
+	 * helper recomputes (and shrinks) the pitch back to width * cpp. */
+	shmem = drm_gem_shmem_create(drm, args->size);
+	if (IS_ERR(shmem))
+		return PTR_ERR(shmem);
+	args->size = shmem->base.size;
+
+	ret = drm_gem_handle_create(file, &shmem->base, &handle);
+	drm_gem_object_put(&shmem->base);
+	if (ret)
+		return ret;
+
+	args->handle = handle;
+	return 0;
+}
+
 static const struct drm_driver lvda_drm_driver = {
 	.driver_features = DRIVER_MODESET | DRIVER_ATOMIC | DRIVER_GEM,
 	DRM_GEM_SHMEM_DRIVER_OPS,
+	.dumb_create = lvda_dumb_create,
 	.fops = &lvda_fops,
 	.name = "lvda",
 	.desc = "LVDA virtual display",
