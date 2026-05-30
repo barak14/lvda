@@ -1,0 +1,2 @@
+# /dev/lvda ownership + permissions. SPEC §5.1.
+KERNEL=="lvda", SUBSYSTEM=="misc", GROUP="lvda", MODE="0660"

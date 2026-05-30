@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0
+obj-m := lvda.o
+lvda-y := lvda_main.o lvda_kms.o lvda_edid.o
+ccflags-y += -Wall

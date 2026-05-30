@@ -1,0 +1,79 @@
+# Maintainer: lvda contributors
+#
+# Build & install:
+#   ./makedist.sh        # stage the source tarball from the working tree
+#   makepkg -si          # build the package and install it (pulls dkms)
+#
+# Requires the matching <kernel>-headers package (DKMS builds the module
+# against your running kernel at install time) and base-devel for the CLI.
+
+pkgname=lvda-dkms
+_pkgname=lvda
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Linux virtual display kernel module for Sunshine/Apollo streaming (DKMS sources)"
+arch=('x86_64')
+url="https://github.com/_/lvda"
+license=('GPL-2.0-only')
+depends=(
+    'dkms'
+)
+makedepends=(
+    'gcc'
+    'make'
+)
+provides=("$_pkgname=$pkgver")
+conflicts=("$_pkgname" "$_pkgname-git")
+# Local source tarball, staged from the working tree by ./makedist.sh.
+source=("$_pkgname-$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+    # The kernel module is built by DKMS at install time. Only the
+    # userspace CLI is compiled here.
+    make -C "$srcdir/$_pkgname-$pkgver/tools/lvda-ctl"
+}
+
+package() {
+    local srcroot="$srcdir/$_pkgname-$pkgver"
+    local dkmsroot="$pkgdir/usr/src/$_pkgname-$pkgver"
+
+    # DKMS source tree: module sources + uapi + dkms.conf.
+    install -dm755 "$dkmsroot"
+    install -Dm644 "$srcroot/packaging/dkms.conf" "$dkmsroot/dkms.conf"
+    cp -a "$srcroot/module" "$dkmsroot/module"
+    cp -a "$srcroot/uapi"   "$dkmsroot/uapi"
+
+    # Strip build artifacts that might have leaked in.
+    find "$dkmsroot/module" -name '*.ko' -delete
+    find "$dkmsroot/module" -name '*.o' -delete
+    find "$dkmsroot/module" -name '*.mod' -delete
+    find "$dkmsroot/module" -name '*.mod.c' -delete
+    find "$dkmsroot/module" -name '.*.cmd' -delete
+    find "$dkmsroot/module" -name 'Module.symvers' -delete
+    find "$dkmsroot/module" -name 'modules.order' -delete
+
+    # Userspace CLI.
+    install -Dm755 "$srcroot/tools/lvda-ctl/lvda-ctl" \
+        "$pkgdir/usr/bin/lvda-ctl"
+
+    # UAPI header for third-party userspace consumers.
+    install -Dm644 "$srcroot/uapi/lvda.h" \
+        "$pkgdir/usr/include/lvda/lvda.h"
+
+    # Group + device perms + rendezvous dir.
+    install -Dm644 "$srcroot/packaging/sysusers.d/lvda.conf" \
+        "$pkgdir/usr/lib/sysusers.d/lvda.conf"
+    install -Dm644 "$srcroot/packaging/tmpfiles.d/lvda.conf" \
+        "$pkgdir/usr/lib/tmpfiles.d/lvda.conf"
+    install -Dm644 "$srcroot/packaging/udev/60-lvda.rules" \
+        "$pkgdir/usr/lib/udev/rules.d/60-lvda.rules"
+
+    # Autoload at boot so the card is always present.
+    install -Dm644 "$srcroot/packaging/modules-load.d/lvda.conf" \
+        "$pkgdir/usr/lib/modules-load.d/lvda.conf"
+
+    # Documentation.
+    install -Dm644 "$srcroot/LICENSE" \
+        "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
