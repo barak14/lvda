@@ -94,6 +94,8 @@ struct lvda_timing {
 	u32 pixel_clock_khz;
 };
 
+#define LVDA_EDID_MIN_PCLK_KHZ 10u
+
 /* CVT vsync width (lines) from the aspect ratio of the blanking-rounded
  * width against the active height; see drm_cvt_mode().
  */
@@ -145,6 +147,10 @@ static int cvt_rb_v1(u32 width, u32 height, u32 refresh_mhz,
 	t->vsync_end = t->vsync_start + vsync;
 
 	pixel_clock_khz = (u64)t->htotal * 1000000ULL / hperiod_ns;
+	if (pixel_clock_khz < LVDA_EDID_MIN_PCLK_KHZ)
+		return -EINVAL;
+	if (pixel_clock_khz > 0xFFFFFFFFULL)
+		return -EOVERFLOW;
 	t->pixel_clock_khz = (u32)pixel_clock_khz;
 
 	return 0;
@@ -388,7 +394,8 @@ static void build_cta_block(const struct lvda_edid_params *p, u8 *b)
 
 static int timing_fits_dtd(const struct lvda_timing *t)
 {
-	return t->hdisplay <= LVDA_DTD_MAX_ACTIVE &&
+	return t->pixel_clock_khz >= LVDA_EDID_MIN_PCLK_KHZ &&
+	       t->hdisplay <= LVDA_DTD_MAX_ACTIVE &&
 	       t->vdisplay <= LVDA_DTD_MAX_ACTIVE &&
 	       t->pixel_clock_khz <= LVDA_DTD_MAX_PCLK_KHZ;
 }

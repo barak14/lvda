@@ -19,7 +19,7 @@
 unsigned int lvda_max_monitors = 1;
 module_param(lvda_max_monitors, uint, 0444);
 MODULE_PARM_DESC(lvda_max_monitors,
-		 "virtual monitors the card exposes (1..64, default 1; raise only for multiple simultaneous streaming clients)");
+		 "virtual monitors the card exposes (1..32, default 1; raise only for multiple simultaneous streaming clients)");
 
 /* DRM parent for the persistent card; outlives it (§8). */
 static struct platform_device *lvda_parent;
@@ -33,18 +33,19 @@ static int lvda_release(struct inode *inode, struct file *file)
 static long lvda_ioctl_add(struct file *file, unsigned long arg)
 {
 	struct lvda_add req;
+	__u64 generation;
 	long ret;
 
 	if (copy_from_user(&req, (void __user *)arg, sizeof(req)))
 		return -EFAULT;
 
-	ret = lvda_monitor_add(file, &req, &req.monitor_id,
+	ret = lvda_monitor_add(file, &req, &req.monitor_id, &generation,
 				&req.drm_card_minor, req.connector_name);
 	if (ret)
 		return ret;
 
 	if (copy_to_user((void __user *)arg, &req, sizeof(req))) {
-		lvda_monitor_remove(file, req.monitor_id);
+		lvda_monitor_abort_add(file, req.monitor_id, generation);
 		return -EFAULT;
 	}
 
@@ -111,7 +112,7 @@ static int __init lvda_init(void)
 {
 	int ret;
 
-	lvda_max_monitors = clamp(lvda_max_monitors, 1u, 64u);
+	lvda_max_monitors = clamp(lvda_max_monitors, 1u, LVDA_MAX_MONITORS);
 
 	lvda_parent = platform_device_register_simple("lvda", -1, NULL, 0);
 	if (IS_ERR(lvda_parent))

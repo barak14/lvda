@@ -190,14 +190,14 @@ static int have_edid_decode(void)
 	return system("command -v edid-decode >/dev/null 2>&1") == 0;
 }
 
-static void edid_decode_warn(const u8 *e, const char *name)
+static void edid_decode_warn(const u8 *e, int len, const char *name)
 {
 	FILE *fp = popen("edid-decode --check >/dev/null 2>&1", "w");
 	int status;
 
 	if (!fp)
 		return;
-	fwrite(e, 1, LVDA_EDID_SIZE, fp);
+	fwrite(e, 1, (size_t)len, fp);
 	status = pclose(fp);
 	if (status != 0)
 		printf("WARN edid-decode --check non-zero for %s (%d)\n",
@@ -317,6 +317,8 @@ int main(int argc, char **argv)
 	      "width 0 -> -EINVAL");
 	check(synth(ID_A, 1920, 1080, 500, 0, b) == -EINVAL,
 	      "refresh 500 mHz -> -EINVAL");
+	check(synth(ID_A, 1, 1, 1000, 0, b) == -EINVAL,
+	      "1x1@1Hz unencodable pixel clock -> -EINVAL");
 
 	/* 8. Optional fixture byte-comparison. */
 	for (i = 0; i < N_FIXTURES; i++)
@@ -332,8 +334,10 @@ int main(int argc, char **argv)
 			const struct fixture *f = &FIXTURES[i];
 			u8 e[LVDA_EDID_SIZE];
 
-			if (synth(ID_A, f->w, f->h, f->mhz, f->hdr, e) == 0)
-				edid_decode_warn(e, f->name);
+			int len = synth(ID_A, f->w, f->h, f->mhz, f->hdr, e);
+
+			if (len > 0)
+				edid_decode_warn(e, len, f->name);
 		}
 	}
 

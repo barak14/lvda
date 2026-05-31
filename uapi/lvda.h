@@ -28,9 +28,10 @@
 #define LVDA_F_ALL  (LVDA_F_HDR)
 
 /*
- * Inclusive request bounds (lvda-SPEC.md §3.1, §5.4). The active dimension
- * an EDID detailed-timing descriptor can encode is further capped at 4095
- * (12-bit field); in-range modes above that fail ADD with EOVERFLOW.
+ * Inclusive request bounds. The EDID base detailed-timing descriptor only has
+ * 12-bit active fields and a 16-bit pixel clock, so larger/faster modes are
+ * carried in DisplayID when they fit there. Requests whose synthesized timing
+ * cannot be encoded fail ADD with -EINVAL or -EOVERFLOW.
  */
 #define LVDA_DIM_MIN          1u
 #define LVDA_DIM_MAX          16384u

@@ -80,7 +80,7 @@ Debian/Ubuntu (`packaging/debian/makedeb.sh`), Fedora/RHEL/openSUSE
   outputs; changing the synthesizer means regenerating them.
 - **fd-ownership model.** A monitor lives exactly as long as the `/dev/lvda`
   file that added it; `close(2)` → `lvda_release_owner()` reaps it.
-- **Module param** `lvda_max_monitors` (uint, `0444`): clamped to `1..64`,
+- **Module param** `lvda_max_monitors` (uint, `0444`): clamped to `1..32`,
   default `1`. Raise only for multiple simultaneous streaming clients.
 - **Kernel C style.** SPDX headers; `/* */` comments say **WHAT** the code does;
   rationale belongs in the README / integration docs or the commit message, not

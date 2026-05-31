@@ -25,7 +25,7 @@ in {
     enable = mkEnableOption "the lvda virtual display driver";
 
     maxMonitors = mkOption {
-      type = types.ints.between 1 64;
+      type = types.ints.between 1 32;
       default = 1;
       description = ''
         Maximum number of virtual monitors the lvda card exposes. Raise only

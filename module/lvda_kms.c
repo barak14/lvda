@@ -45,6 +45,7 @@ struct lvda_monitor {
 	u16 edid_len;
 	bool active;
 	void *owner;	/* /dev/lvda file that added it; NULL = free slot */
+	u64 generation;
 };
 
 struct lvda_device {
@@ -237,17 +238,31 @@ DEFINE_DRM_GEM_FOPS(lvda_fops);
 static int lvda_dumb_create(struct drm_file *file, struct drm_device *drm,
 			    struct drm_mode_create_dumb *args)
 {
-	u32 min_pitch = DIV_ROUND_UP(args->width * args->bpp, 8);
+	u64 bits, min_pitch, pitch, size;
 	struct drm_gem_shmem_object *shmem;
 	u32 handle;
 	int ret;
 
-	args->pitch = ALIGN(min_pitch, LVDA_FB_PITCH_ALIGN);
-	args->size = (u64)args->pitch * args->height;
+	if (!args->width || !args->height || !args->bpp || args->flags)
+		return -EINVAL;
+
+	bits = (u64)args->width * args->bpp;
+	min_pitch = (bits + 7) / 8;
+	pitch = ALIGN(min_pitch, (u64)LVDA_FB_PITCH_ALIGN);
+	if (pitch > (u64)~0U)
+		return -EINVAL;
+
+	if (check_mul_overflow(pitch, (u64)args->height, &size))
+		return -EINVAL;
+	if ((u64)(size_t)size != size)
+		return -EINVAL;
+
+	args->pitch = (u32)pitch;
+	args->size = size;
 
 	/* Allocate the object at the aligned pitch directly: the shmem dumb
 	 * helper recomputes (and shrinks) the pitch back to width * cpp. */
-	shmem = drm_gem_shmem_create(drm, args->size);
+	shmem = drm_gem_shmem_create(drm, (size_t)size);
 	if (IS_ERR(shmem))
 		return PTR_ERR(shmem);
 	args->size = shmem->base.size;
@@ -371,6 +386,9 @@ int lvda_card_register(struct device *parent, unsigned int n_monitors)
 	unsigned int i;
 	int ret;
 
+	if (n_monitors < 1 || n_monitors > LVDA_MAX_MONITORS)
+		return -EINVAL;
+
 	if (lvda_card)
 		return -EBUSY;
 
@@ -421,11 +439,13 @@ void lvda_card_unregister(void)
 }
 
 int lvda_monitor_add(void *owner, const struct lvda_add *req,
-		      __u32 *monitor_id, __u32 *card_minor, char name[32])
+		      __u32 *monitor_id, __u64 *generation,
+		      __u32 *card_minor, char name[32])
 {
 	struct lvda_device *ldev = lvda_card;
 	struct lvda_monitor *mon = NULL;
 	u8 edid_buf[LVDA_EDID_SIZE];
+	u64 gen;
 	unsigned int i;
 	int len;
 
@@ -460,12 +480,14 @@ int lvda_monitor_add(void *owner, const struct lvda_add *req,
 
 	memcpy(mon->edid_bytes, edid_buf, len);
 	mon->edid_len = len;
+	gen = ++mon->generation;
 	mon->active = true;
 	mon->owner = owner;
 	mon->connector.status = connector_status_connected;
 	mutex_unlock(&ldev->lock);
 
 	*monitor_id = i;
+	*generation = gen;
 	*card_minor = ldev->drm.primary->index;
 	strscpy(name, mon->connector.name, 32);
 
@@ -500,6 +522,33 @@ int lvda_monitor_remove(void *owner, __u32 monitor_id)
 	drm_kms_helper_hotplug_event(&ldev->drm);
 
 	return 0;
+}
+
+void lvda_monitor_abort_add(void *owner, __u32 monitor_id, __u64 generation)
+{
+	struct lvda_device *ldev = lvda_card;
+	struct lvda_monitor *mon;
+	bool changed = false;
+
+	if (!ldev)
+		return;
+
+	if (monitor_id >= ldev->n_monitors)
+		return;
+
+	mon = &ldev->monitors[monitor_id];
+
+	mutex_lock(&ldev->lock);
+	if (mon->owner == owner && mon->generation == generation) {
+		mon->active = false;
+		mon->owner = NULL;
+		mon->connector.status = connector_status_disconnected;
+		changed = true;
+	}
+	mutex_unlock(&ldev->lock);
+
+	if (changed)
+		drm_kms_helper_hotplug_event(&ldev->drm);
 }
 
 void lvda_release_owner(void *owner)

@@ -19,6 +19,8 @@ struct device;
  * lvda_main.c; consumed by lvda_card_register(). */
 extern unsigned int lvda_max_monitors;
 
+#define LVDA_MAX_MONITORS 32u
+
 /*
  * Register the single persistent DRM card with n_monitors pre-created virtual
  * monitors, all initially disconnected. parent is the module-lifetime
@@ -44,11 +46,16 @@ void lvda_card_unregister(void);
  *   -ENODEV    card not registered
  */
 int lvda_monitor_add(void *owner, const struct lvda_add *req,
-		      __u32 *monitor_id, __u32 *card_minor, char name[32]);
+		      __u32 *monitor_id, __u64 *generation,
+		      __u32 *card_minor, char name[32]);
 
 /* Disable a monitor previously added by the same owner. Returns -EINVAL if
  * monitor_id is out of range or not owned by owner. */
 int lvda_monitor_remove(void *owner, __u32 monitor_id);
+
+/* Best-effort rollback for ADD after userspace copy-out failure. The generation
+ * prevents deleting a newer monitor that reused the same slot on the same fd. */
+void lvda_monitor_abort_add(void *owner, __u32 monitor_id, __u64 generation);
 
 /* Disable every monitor owned by owner (called on /dev/lvda close). */
 void lvda_release_owner(void *owner);

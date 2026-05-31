@@ -145,7 +145,7 @@ ls /dev/dri/card*                # the persistent card is /dev/dri/cardN
 ```
 
 The card exposes one virtual monitor by default. Raise the pool only if you
-stream to multiple clients at once (1..64):
+stream to multiple clients at once (1..32):
 
 ```sh
 sudo modprobe lvda lvda_max_monitors=2
