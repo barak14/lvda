@@ -8,6 +8,7 @@
  * its on-demand virtual monitors). See lvda-SPEC.md §8, §9.
  */
 
+#include <linux/build_bug.h>
 #include <linux/types.h>
 
 #include "../uapi/lvda.h"
@@ -20,6 +21,13 @@ struct device;
 extern unsigned int lvda_max_monitors;
 
 #define LVDA_MAX_MONITORS 32u
+
+/*
+ * Each monitor's plane/encoder gets a BIT(slot) crtc mask; possible_crtcs and
+ * possible_clones are 32-bit, so the slot count must stay within a u32 mask.
+ * Raising this past 32 would silently overflow BIT(slot) at monitor init.
+ */
+static_assert(LVDA_MAX_MONITORS <= 32u, "monitor slot mask exceeds u32");
 
 /*
  * Register the single persistent DRM card with n_monitors pre-created virtual

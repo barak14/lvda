@@ -94,20 +94,6 @@ static void lvda_plane_atomic_update(struct drm_plane *plane,
 	(void)state;
 }
 
-static void lvda_crtc_atomic_enable(struct drm_crtc *crtc,
-				     struct drm_atomic_state *state)
-{
-	(void)crtc;
-	(void)state;
-}
-
-static void lvda_crtc_atomic_disable(struct drm_crtc *crtc,
-				      struct drm_atomic_state *state)
-{
-	(void)crtc;
-	(void)state;
-}
-
 static int lvda_plane_atomic_check(struct drm_plane *plane,
 				    struct drm_atomic_state *state)
 {
@@ -192,8 +178,6 @@ static const struct drm_crtc_funcs lvda_crtc_funcs = {
 
 static const struct drm_crtc_helper_funcs lvda_crtc_helper_funcs = {
 	.atomic_check = drm_crtc_helper_atomic_check,
-	.atomic_enable = lvda_crtc_atomic_enable,
-	.atomic_disable = lvda_crtc_atomic_disable,
 };
 
 static const struct drm_encoder_funcs lvda_encoder_funcs = {
@@ -258,7 +242,6 @@ static int lvda_dumb_create(struct drm_file *file, struct drm_device *drm,
 		return -EINVAL;
 
 	args->pitch = (u32)pitch;
-	args->size = size;
 
 	/* Allocate the object at the aligned pitch directly: the shmem dumb
 	 * helper recomputes (and shrinks) the pitch back to width * cpp. */
@@ -400,7 +383,9 @@ int lvda_card_register(struct device *parent, unsigned int n_monitors)
 
 	drm = &ldev->drm;
 	ldev->n_monitors = n_monitors;
-	mutex_init(&ldev->lock);
+	ret = drmm_mutex_init(drm, &ldev->lock);
+	if (ret)
+		goto err_put;
 
 	ret = lvda_init_mode_config(drm);
 	if (ret)

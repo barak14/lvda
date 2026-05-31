@@ -20,7 +20,7 @@
 #define LVDA_IOC_MAGIC 'V'
 
 #define LVDA_PROTOCOL_MAJOR 2
-#define LVDA_PROTOCOL_MINOR 0
+#define LVDA_PROTOCOL_MINOR 1
 #define LVDA_PROTOCOL_PATCH 0
 
 /* Feature flags for lvda_add.flags. */
@@ -28,13 +28,16 @@
 #define LVDA_F_ALL  (LVDA_F_HDR)
 
 /*
- * Inclusive request bounds. The EDID base detailed-timing descriptor only has
- * 12-bit active fields and a 16-bit pixel clock, so larger/faster modes are
- * carried in DisplayID when they fit there. Requests whose synthesized timing
- * cannot be encoded fail ADD with -EINVAL or -EOVERFLOW.
+ * Inclusive request bounds. LVDA_DIM_MAX is a driver policy ceiling that
+ * bounds the scanout buffer a compositor pins when it adopts the monitor's
+ * preferred mode (height * ALIGN(width * 4, 256) bytes), not an EDID encoding
+ * limit. The synthesized timing rides in the base detailed-timing descriptor,
+ * or in DisplayID when its 12-bit active fields / 16-bit pixel clock cannot
+ * hold it. Out-of-range dimensions or refresh fail ADD with -EINVAL; a timing
+ * whose pixel clock exceeds even DisplayID fails with -EOVERFLOW.
  */
 #define LVDA_DIM_MIN          1u
-#define LVDA_DIM_MAX          16384u
+#define LVDA_DIM_MAX          8192u
 #define LVDA_REFRESH_MHZ_MIN  1000u
 #define LVDA_REFRESH_MHZ_MAX  1000000u
 
@@ -49,8 +52,8 @@
 struct lvda_add {
 	/* IN */
 	__u8  client_id[16];
-	__u32 width;            /* 1..16384 */
-	__u32 height;           /* 1..16384 */
+	__u32 width;            /* 1..8192 */
+	__u32 height;           /* 1..8192 */
 	__u32 refresh_mhz;      /* 1000..1000000 (milli-Hz) */
 	__u32 flags;            /* LVDA_F_* */
 	__u32 reserved[2];      /* MBZ */
