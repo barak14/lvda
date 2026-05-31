@@ -204,6 +204,43 @@ static void edid_decode_warn(const u8 *e, const char *name)
 		       name, status);
 }
 
+/* The 'ambient' case: an all-zero client_id is a documented sentinel
+ * meaning 'no caller identity supplied'. The kernel maps it to serial 0
+ * (lvda module/lvda_edid.c §6.1) so userspace templates (e.g. a GDM
+ * monitors.xml that pins the ambient lvda connector) can match against
+ * a stable identity without depending on KEY. */
+static void check_ambient_serial_zero(void)
+{
+	static const u8 ID_ZERO[16] = {0};
+	u8 e[LVDA_EDID_SIZE];
+	int len = synth(ID_ZERO, 1920, 1080, 60000, 0, e);
+
+	check(len > 0, "ambient: synth all-zero client_id succeeds");
+	if (len > 0) {
+		u32 serial = (u32)e[OFF_SERIAL]
+			   | ((u32)e[OFF_SERIAL + 1] << 8)
+			   | ((u32)e[OFF_SERIAL + 2] << 16)
+			   | ((u32)e[OFF_SERIAL + 3] << 24);
+		check(serial == 0, "ambient: all-zero client_id -> EDID serial 0");
+	}
+}
+
+static void check_nonambient_serial_nonzero(void)
+{
+	static const u8 ID[16] = {1};  /* not all-zero */
+	u8 e[LVDA_EDID_SIZE];
+	int len = synth(ID, 1920, 1080, 60000, 0, e);
+
+	check(len > 0, "non-ambient: synth succeeds");
+	if (len > 0) {
+		u32 serial = (u32)e[OFF_SERIAL]
+			   | ((u32)e[OFF_SERIAL + 1] << 8)
+			   | ((u32)e[OFF_SERIAL + 2] << 16)
+			   | ((u32)e[OFF_SERIAL + 3] << 24);
+		check(serial != 0, "non-ambient: non-zero client_id -> EDID serial non-zero (siphash output)");
+	}
+}
+
 int main(int argc, char **argv)
 {
 	u8 a[LVDA_EDID_SIZE], b[LVDA_EDID_SIZE];
@@ -284,6 +321,10 @@ int main(int argc, char **argv)
 	/* 8. Optional fixture byte-comparison. */
 	for (i = 0; i < N_FIXTURES; i++)
 		check_fixture(&FIXTURES[i]);
+
+	/* 8b. Ambient (all-zero) client_id: sentinel for 'no identity'. */
+	check_ambient_serial_zero();
+	check_nonambient_serial_nonzero();
 
 	/* Optional external validation, warn-only. */
 	if (have_edid_decode()) {

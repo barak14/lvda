@@ -286,7 +286,21 @@ static void build_base_block(const struct lvda_edid_params *p,
 	u32 pnp = (((u32)('L' - '@') & 0x1F) << 10) |
 		  (((u32)('V' - '@') & 0x1F) << 5) |
 		  ((u32)('D' - '@') & 0x1F);
-	u32 serial = (u32)siphash24(KEY, p->client_id, 16);
+	/* §6.1: the EDID serial is normally siphash24(KEY, client_id, 16),
+	 * giving a stable per-client identity that's salt-dependent. As a
+	 * documented sentinel for 'no caller identity supplied', an all-zero
+	 * client_id maps to serial 0; this lets userspace templates (e.g.
+	 * display-manager monitors.xml configs that pin the ambient lvda
+	 * connector) target a stable identity without depending on KEY. */
+	u32 serial = 0;
+	{
+		int i;
+		for (i = 0; i < 16; i++)
+			if (p->client_id[i]) {
+				serial = (u32)siphash24(KEY, p->client_id, 16);
+				break;
+			}
+	}
 	u8 depth = p->hdr ? 0x3 : 0x2;	/* 10 bpc (HDR) / 8 bpc (SDR) */
 	u8 h_cm = clamp_u8_min1((u32)((u64)p->width * 254 / (96 * 100)));
 	u8 v_cm = clamp_u8_min1((u32)((u64)p->height * 254 / (96 * 100)));
