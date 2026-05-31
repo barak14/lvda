@@ -23,7 +23,7 @@ modules_install:
 KREL      ?= $(shell uname -r)
 KIMG      ?= $(firstword $(wildcard /usr/lib/modules/$(KREL)/vmlinuz /boot/vmlinuz-$(KREL) /lib/modules/$(KREL)/vmlinuz))
 TESTDIR   := $(abspath $(PWD)/../tests/userspace)
-VNG_TESTS := add_remove version pool_cap fd_reap edid_bytes modifier_negotiation kmsgrab_roundtrip displayid_mode
+VNG_TESTS := add_remove version pool_cap fd_reap edid_bytes modifier_negotiation kmsgrab_roundtrip displayid_mode connector_caps
 VNG_SCRIPT = cd $(PWD); uname -r; insmod ./lvda.ko || { echo INSMOD_FAILED; exit 1; }; echo INSMOD_OK; ls -l /dev/lvda; fail=0; for t in $(VNG_TESTS); do echo "=== $$t ==="; if "$(TESTDIR)/$$t"; then echo rc=0; else echo "rc=$$?"; fail=$$((fail+1)); fi; done; echo "=== dmesg ==="; dmesg | grep -iE "lvda|BUG|WARN|oops|call trace" | tail -20; rmmod lvda && echo RMMOD_OK; echo "RESULT: $$fail test(s) failed"; exit $$fail
 
 vng-test: all

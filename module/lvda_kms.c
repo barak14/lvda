@@ -336,6 +336,10 @@ static int lvda_init_monitor(struct lvda_device *ldev, unsigned int i)
 
 	drm_crtc_helper_add(&mon->crtc, &lvda_crtc_helper_funcs);
 
+	/* VRR_ENABLED lets the compositor toggle adaptive sync on the CRTC. */
+	drm_object_attach_property(&mon->crtc.base,
+				   drm->mode_config.prop_vrr_enabled, 0);
+
 	ret = drm_encoder_init(drm, &mon->encoder, &lvda_encoder_funcs,
 			       DRM_MODE_ENCODER_VIRTUAL, "lvda-encoder-%u", i);
 	if (ret)
@@ -356,6 +360,26 @@ static int lvda_init_monitor(struct lvda_device *ldev, unsigned int i)
 		return ret;
 
 	drm_connector_attach_edid_property(&mon->connector);
+
+	/* Capability properties a compositor reads off the connector. The
+	 * per-monitor EDID gates HDR / wide color gamut: BT.2020 + PQ ride in
+	 * the EDID only when LVDA_F_HDR is set, so those light up on HDR
+	 * monitors and stay incapable on SDR ones. VRR is always advertised. */
+	ret = drm_connector_attach_vrr_capable_property(&mon->connector);
+	if (ret)
+		return ret;
+	drm_connector_set_vrr_capable_property(&mon->connector, true);
+
+	ret = drm_connector_attach_hdr_output_metadata_property(&mon->connector);
+	if (ret)
+		return ret;
+
+	ret = drm_mode_create_dp_colorspace_property(&mon->connector, 0);
+	if (ret)
+		return ret;
+	ret = drm_connector_attach_colorspace_property(&mon->connector);
+	if (ret)
+		return ret;
 	mon->connector.polled = DRM_CONNECTOR_POLL_HPD;
 	mon->connector.status = connector_status_disconnected;
 
@@ -398,6 +422,17 @@ int lvda_card_register(struct device *parent, unsigned int n_monitors)
 	}
 
 	drm_mode_config_reset(drm);
+
+	/* "max bpc" needs the connector state drm_mode_config_reset() just
+	 * created. Advertise 8..10 bpc — the depths the scanout formats cover
+	 * (XRGB8888 / XBGR2101010) — so the output reports a real color
+	 * resolution rather than "unknown". */
+	for (i = 0; i < n_monitors; i++) {
+		ret = drm_connector_attach_max_bpc_property(
+			&ldev->monitors[i].connector, 8, 10);
+		if (ret)
+			goto err_put;
+	}
 
 	ret = drm_dev_register(drm, 0);
 	if (ret)
