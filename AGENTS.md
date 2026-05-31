@@ -15,11 +15,12 @@ A monitor is owned by the `/dev/lvda` file that added it and is reaped when
 that file closes — the open fd is the liveness signal (no heartbeat, no
 watchdog).
 
-User-facing docs: `README.md`. Status / integration notes:
-`INTEGRATION-PLAN.md`, `INTEGRATION-RESULTS.md`. In-source `lvda-SPEC.md §N`
-backrefs point at a spec that was dropped from the tree; the README and the
-integration docs are the current authority. The earlier Rust prototype lives on
-the `archive/rust` branch.
+User-facing docs: `README.md` (overview + `lvda-ctl` usage) and `BUILD.md`
+(kernel requirements, install, load, permissions, uninstall). Status /
+integration notes: `INTEGRATION-PLAN.md`, `INTEGRATION-RESULTS.md`. In-source
+`lvda-SPEC.md §N` backrefs point at a spec that was dropped from the tree; the
+README, BUILD.md, and the integration docs are the current authority. The
+earlier Rust prototype lives on the `archive/rust` branch.
 
 ## Layout
 
