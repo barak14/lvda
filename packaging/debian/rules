@@ -1,0 +1,48 @@
+#!/usr/bin/make -f
+# SPDX-License-Identifier: GPL-2.0
+#
+# Build the lvda-dkms .deb. The kernel module is built by DKMS at install
+# time against the running kernel; only the lvda-ctl userspace CLI is
+# compiled here.
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+# Single source of truth for the module version is debian/changelog.
+MODULE_VERSION := $(shell dpkg-parsechangelog -SVersion | cut -d- -f1)
+DKMSROOT       := debian/lvda-dkms/usr/src/lvda-$(MODULE_VERSION)
+PKGROOT        := debian/lvda-dkms
+
+%:
+	dh $@ --with dkms
+
+override_dh_auto_build:
+	$(MAKE) -C tools/lvda-ctl
+
+override_dh_auto_clean:
+	-$(MAKE) -C tools/lvda-ctl clean
+
+override_dh_auto_install:
+	# DKMS source tree (dh_dkms installs dkms.conf itself, from
+	# debian/lvda-dkms.dkms — keep its content in lockstep with
+	# packaging/dkms.conf).
+	install -dm755 $(DKMSROOT)
+	cp -a module $(DKMSROOT)/module
+	cp -a uapi   $(DKMSROOT)/uapi
+	find $(DKMSROOT)/module \( -name '*.o' -o -name '*.ko' -o -name '*.mod' \
+		-o -name '*.mod.c' -o -name '.*.cmd' -o -name 'Module.symvers' \
+		-o -name 'modules.order' \) -delete
+
+	# Userspace CLI + UAPI header.
+	install -Dm755 tools/lvda-ctl/lvda-ctl $(PKGROOT)/usr/bin/lvda-ctl
+	install -Dm644 uapi/lvda.h             $(PKGROOT)/usr/include/lvda/lvda.h
+
+	# systemd drop-ins. dpkg triggers shipped by systemd reload udev,
+	# sysusers, and tmpfiles automatically once these land under /usr/lib.
+	install -Dm644 packaging/sysusers.d/lvda.conf \
+		$(PKGROOT)/usr/lib/sysusers.d/lvda.conf
+	install -Dm644 packaging/tmpfiles.d/lvda.conf \
+		$(PKGROOT)/usr/lib/tmpfiles.d/lvda.conf
+	install -Dm644 packaging/udev/60-lvda.rules \
+		$(PKGROOT)/usr/lib/udev/rules.d/60-lvda.rules
+	install -Dm644 packaging/modules-load.d/lvda.conf \
+		$(PKGROOT)/usr/lib/modules-load.d/lvda.conf

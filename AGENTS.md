@@ -36,7 +36,8 @@ earlier Rust prototype lives on the `archive/rust` branch.
 | `tools/lvda-ctl/` | Userspace CLI (`up` / `down` / `status`); holds the `/dev/lvda` fd open as the liveness daemon. |
 | `tests/host/` | Host-built EDID conformance (`test_edid` compiles `lvda_edid.c` directly) + viability probes (`gbm_probe`, `kms_scanout_probe`); `vectors/` holds golden EDID bytes. |
 | `tests/userspace/` | `/dev/lvda` integration tests; each skips with exit 0 when the device is absent. libdrm-based tests build only when `pkg-config` finds libdrm. |
-| `packaging/` | DKMS (`dkms.conf`, `arch/PKGBUILD` + `makedist.sh`) and `sysusers.d` / `tmpfiles.d` / `udev` / `modules-load.d` drop-ins. |
+| `packaging/` | Shared drop-ins (`sysusers.d`, `tmpfiles.d`, `udev`, `modules-load.d`) + canonical `dkms.conf`, plus per-distro packagers under `arch/` (PKGBUILD), `debian/` (debhelper + dh-dkms + `makedeb.sh`), `rpm/` (`lvda-dkms.spec` + `makerpm.sh`), and `nix/` (derivations consumed by the repo-root `flake.nix`). |
+| `flake.nix` | Nix flake entry point — exposes `packages.lvda-ctl`, `packages.lvda` (kernel module), and `nixosModules.default`. Derivations live in `packaging/nix/`. |
 | `sync-and-probe.sh` | Push the driver to a VM over SSH, build + load it, run a viability probe. |
 
 ## Build & Test
@@ -60,7 +61,11 @@ Host EDID tests: `make -C tests/host && tests/host/test_edid`
 Userspace integration: `make -C tests/userspace`
 (libdrm tests skipped when libdrm is absent).
 
-DKMS package (Arch/CachyOS): `cd packaging/arch && ./makedist.sh && makepkg -si`.
+DKMS package per distro: Arch (`packaging/arch/makedist.sh && makepkg -si`),
+Debian/Ubuntu (`packaging/debian/makedeb.sh`), Fedora/RHEL/openSUSE
+(`packaging/rpm/makerpm.sh`), NixOS (`nix build .#lvda` or the
+`nixosModules.default` from `flake.nix`). All four ship the same DKMS source
+(`packaging/dkms.conf`) + drop-ins from `packaging/{sysusers,tmpfiles,udev,modules-load}.d`.
 
 ## Conventions
 

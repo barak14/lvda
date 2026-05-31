@@ -6,52 +6,124 @@
   `CONFIG_DRM_GEM_SHMEM_HELPER` (every modern distro kernel). No special config
   and no kernel rebuild are needed.
 - Build tools: `make`, a C compiler (gcc or clang), and the headers for your
-  running kernel (e.g. `linux-headers`, `linux-cachyos-headers`, …). `dkms` if
-  you want automatic rebuilds across kernel updates.
+  running kernel (`linux-headers`, `kernel-devel`, `linux-headers-amd64`,
+  `kernel-default-devel`, …). `dkms` if you want automatic rebuilds across
+  kernel updates.
 
 ---
 
-## Install
+## Install — pick your distro
 
-### Option A — DKMS package (recommended)
+Every distro recipe below stages a clean source tarball from the working tree,
+produces a DKMS package, and installs the same drop-ins: the `lvda` group
+(`/usr/lib/sysusers.d`), the `/run/lvda` rendezvous dir
+(`/usr/lib/tmpfiles.d`), `/dev/lvda` ownership/perms
+(`/usr/lib/udev/rules.d`), boot autoload (`/usr/lib/modules-load.d`), plus
+`/usr/bin/lvda-ctl` and the `/usr/include/lvda/lvda.h` UAPI header.
 
-Auto-rebuilds on kernel updates and installs everything (module, `lvda-ctl`,
-and the udev / sysusers / tmpfiles / modules-load drop-ins).
-
-Arch / CachyOS:
+### Arch / CachyOS — `.pkg.tar.zst`
 
 ```sh
 cd packaging/arch
-./makedist.sh     # stage the source tarball from this working tree
-makepkg -si       # build the package and install it
+./makedist.sh                          # stage the source tarball
+makepkg -si                            # build + install (pulls dkms)
 ```
 
-`makepkg -si` pulls `dkms`, builds and installs `lvda.ko` against your running
-kernel, creates the `lvda` group, the `/run/lvda` dir, and the udev rule, and
-enables autoload at boot. (Re-run `./makedist.sh && makepkg -fi` after editing
-the sources to rebuild and reinstall.)
+Re-run `./makedist.sh && makepkg -fi` after editing the sources.
 
-### Option B — manual build
+### Debian / Ubuntu — `.deb`
+
+One-time build deps (Debian 12+, Ubuntu 22.04+):
+
+```sh
+sudo apt-get install build-essential debhelper dh-dkms dkms linux-headers-$(uname -r)
+```
+
+Build + install:
+
+```sh
+cd packaging/debian
+./makedeb.sh                                       # writes lvda-dkms_<ver>-1_amd64.deb
+sudo apt-get install ./lvda-dkms_*.deb
+```
+
+`apt` runs DKMS in the postinst, so install builds and loads the module
+against the running kernel.
+
+### Fedora / RHEL / openSUSE — `.rpm`
+
+One-time build deps:
+
+```sh
+# Fedora / RHEL / CentOS / Rocky:
+sudo dnf install rpm-build gcc make dkms kernel-devel
+# openSUSE:
+sudo zypper install rpm-build gcc make dkms kernel-default-devel
+```
+
+Build + install:
+
+```sh
+cd packaging/rpm
+./makerpm.sh                                       # writes lvda-dkms-<ver>.x86_64.rpm
+sudo dnf install ./lvda-dkms-*.rpm                 # or: sudo zypper install ./lvda-dkms-*.rpm
+```
+
+### NixOS — flake
+
+Pull the module via the flake and turn it on:
+
+```nix
+# flake.nix
+{
+  inputs.lvda.url = "github:_/lvda";
+  outputs = { self, nixpkgs, lvda }: {
+    nixosConfigurations.mybox = nixpkgs.lib.nixosSystem {
+      system = "x86_64-linux";
+      modules = [
+        lvda.nixosModules.default
+        ({ ... }: {
+          services.lvda = {
+            enable = true;
+            maxMonitors = 1;            # raise only for multi-client streaming
+          };
+          users.users.alice.extraGroups = [ "lvda" ];
+        })
+      ];
+    };
+  };
+}
+```
+
+`sudo nixos-rebuild switch` rebuilds the module against
+`config.boot.kernelPackages` and installs `lvda-ctl` system-wide. No DKMS —
+the module is rebuilt automatically every time the kernel input bumps.
+
+Standalone builds (no NixOS): `nix build .#lvda-ctl` or `nix build .#lvda`.
+
+### Manual build (no distro package)
+
+If your distro isn't listed, build the module and CLI by hand:
 
 ```sh
 cd module
-make                      # builds lvda.ko against the running kernel
+make                                                # builds lvda.ko
 sudo make modules_install
 sudo depmod -a
-```
 
-For a manual install, also drop in the group + device-permission + autoload
-files (the DKMS package does this for you):
+cd ../tools/lvda-ctl
+make
+sudo make install                                   # /usr/bin/lvda-ctl
 
-```sh
-cd packaging
-sudo install -Dm644 sysusers.d/lvda.conf     /usr/lib/sysusers.d/lvda.conf
+cd ../../packaging
+sudo install -Dm644 sysusers.d/lvda.conf      /usr/lib/sysusers.d/lvda.conf
 sudo install -Dm644 tmpfiles.d/lvda.conf      /usr/lib/tmpfiles.d/lvda.conf
 sudo install -Dm644 udev/60-lvda.rules        /usr/lib/udev/rules.d/60-lvda.rules
 sudo install -Dm644 modules-load.d/lvda.conf  /usr/lib/modules-load.d/lvda.conf
-sudo install -Dm755 ../tools/lvda-ctl/lvda-ctl /usr/bin/lvda-ctl
 sudo systemd-sysusers && sudo systemd-tmpfiles --create && sudo udevadm control --reload
 ```
+
+This skips DKMS — rebuild the module manually after each kernel update.
 
 ---
 
@@ -78,6 +150,8 @@ stream to multiple clients at once (1..64):
 ```sh
 sudo modprobe lvda lvda_max_monitors=2
 ```
+
+(NixOS users set `services.lvda.maxMonitors = N` instead.)
 
 ---
 
@@ -113,5 +187,15 @@ use the driver.)
 
 ```sh
 sudo modprobe -r lvda
-# DKMS install:  sudo pacman -R lvda-dkms      (or: sudo dkms remove lvda/<ver> --all)
 ```
+
+Then remove the package via your distro tool:
+
+| Distro | Command |
+|---|---|
+| Arch / CachyOS | `sudo pacman -R lvda-dkms` |
+| Debian / Ubuntu | `sudo apt-get purge lvda-dkms` |
+| Fedora / RHEL | `sudo dnf remove lvda-dkms` |
+| openSUSE | `sudo zypper remove lvda-dkms` |
+| NixOS | set `services.lvda.enable = false;` and `nixos-rebuild switch` |
+| Manual | `sudo dkms remove lvda/<ver> --all` (if you added it to DKMS by hand) plus delete the drop-ins under `/usr/lib/{sysusers,tmpfiles,modules-load}.d/lvda.conf`, `/usr/lib/udev/rules.d/60-lvda.rules`, and `/usr/bin/lvda-ctl` |

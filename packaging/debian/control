@@ -1,0 +1,32 @@
+Source: lvda
+Section: kernel
+Priority: optional
+Maintainer: lvda contributors <none@example.com>
+Build-Depends:
+ debhelper-compat (= 13),
+ dh-dkms,
+ dkms
+Standards-Version: 4.7.0
+Homepage: https://github.com/_/lvda
+Rules-Requires-Root: no
+
+Package: lvda-dkms
+Architecture: amd64
+Depends:
+ dkms,
+ ${misc:Depends},
+ ${shlibs:Depends}
+Recommends:
+ linux-headers-amd64 | linux-headers-generic | linux-headers
+Conflicts: lvda, lvda-git
+Provides: lvda (= ${binary:Version})
+Description: virtual display driver for Sunshine/Apollo streaming (DKMS)
+ lvda is a Linux DRM kernel module that exposes a persistent virtual GPU
+ (/dev/dri/cardN) carrying a pool of virtual monitors. The monitors start
+ disconnected; a control ioctl lights one up at an exact resolution, refresh
+ rate, and HDR mode on demand and hotplug-connects it. A streaming host
+ (Sunshine / Apollo + Moonlight) can then serve a client at its native mode.
+ .
+ Ships the kernel module source (built per-kernel via DKMS), the lvda-ctl
+ userspace daemon, and the udev/sysusers/tmpfiles/modules-load drop-ins
+ required to use the driver.
