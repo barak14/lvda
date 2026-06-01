@@ -1,10 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
- * SPEC §15.2 pool cap: multiple monitors may be added on one fd (the old
- * one-per-fd EBUSY rule is gone). ADD until the pool is exhausted (-ENOSPC),
- * then REMOVE one and confirm the freed slot can be reused. Any ADD failing
- * with something other than ENOSPC — notably EBUSY — fails the test. Skip
- * with success when /dev/lvda is absent.
+ * Multiple monitors may be added on one fd. ADD until the pool is exhausted
+ * (-ENOSPC), then REMOVE one and confirm the freed slot can be reused. Any
+ * ADD failing with something other than ENOSPC — notably EBUSY — fails the
+ * test. Skip with success when /dev/lvda is absent.
  */
 
 #define _POSIX_C_SOURCE 200809L

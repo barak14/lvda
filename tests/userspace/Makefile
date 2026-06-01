@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
 #
-# SPEC §15.2 userspace integration tests for /dev/lvda. The dependency-free
+# Userspace integration tests for /dev/lvda. The dependency-free
 # binaries (POSIX + libc, no libdrm) build always; each skips with exit 0
 # when the device is absent. The libdrm-based tests (modifier_negotiation,
 # kmsgrab_roundtrip) build only when libdrm is available.

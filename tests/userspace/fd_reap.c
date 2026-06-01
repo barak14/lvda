@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
- * SPEC §15.2 fd-reap: a child ADDs a monitor and _exit()s without REMOVEing
+ * A child ADDs a monitor and _exit()s without REMOVEing
  * or closing the fd. The kernel must reap the monitor on process teardown, so
  * its connector returns to "disconnected" while the persistent card node
  * stays. Skip with success when /dev/lvda is absent.

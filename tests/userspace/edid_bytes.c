@@ -1,9 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
- * SPEC §15.2 edid bytes: ADD a monitor, read its EDID back from sysfs
+ * EDID bytes: ADD a monitor, read its EDID back from sysfs
  * (/sys/class/drm/card<minor>-<connector>/edid), and validate the base +
  * CTA checksums, the active resolution in the preferred DTD, and the video
- * input byte. One case for SDR, one for HDR (§6). No libdrm — sysfs only.
+ * input byte. One case for SDR, one for HDR. No libdrm — sysfs only.
  * Skip with success when /dev/lvda is absent.
  */
 
@@ -72,10 +72,9 @@ static unsigned block_sum(const unsigned char *buf, int from, int to)
 }
 
 /*
- * Force a connector reprobe so the kernel populates the sysfs edid file. The
- * edid attribute is only filled in once the connector has been probed; a
- * write of "detect" to the status attribute triggers that probe. Errors are
- * ignored — the subsequent read_sysfs_edid already retries.
+ * Force a connector reprobe so the kernel populates the sysfs edid file. A
+ * write of "detect" to the status attribute triggers the probe. Errors are
+ * ignored — read_sysfs_edid retries.
  */
 static void force_detect(unsigned minor, const char *conn)
 {
@@ -142,7 +141,7 @@ static int check_edid(const unsigned char *e, unsigned char expect_video_in,
 		ok = 0;
 	}
 
-	/* Preferred-mode DTD at base offset 0x36 (§6.1). */
+	/* Preferred-mode DTD at base offset 0x36. */
 	unsigned hactive = e[0x38] | ((unsigned)(e[0x3A] >> 4) << 8);
 	unsigned vactive = e[0x3B] | ((unsigned)(e[0x3D] >> 4) << 8);
 	if (hactive != 1920) {
@@ -163,7 +162,7 @@ static int check_edid(const unsigned char *e, unsigned char expect_video_in,
 	/*
 	 * Walk the CTA-861 data block collection (extension byte 0x04
 	 * onward) looking for an extended-tag block (tag type 0x07) with
-	 * extended tag 0x06 (HDR Static Metadata, §6.2). Stop at the DTD
+	 * extended tag 0x06 (HDR Static Metadata). Stop at the DTD
 	 * offset or at the first padding (zero) header.
 	 */
 	int found_hdr = 0;

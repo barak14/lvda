@@ -31,11 +31,31 @@
 #include "lvda.h"
 #include "lvda_edid.h"
 
-/*
- * One virtual monitor = one full {plane, CRTC, encoder, connector} chain so it
- * can be enabled at its own mode independently. possible_crtcs is BIT(slot)
- * because drm_crtc->index is assigned in creation order (§9).
- */
+/* EDID format constants in lvda_edid.h mirror <drm/drm_edid.h>; verify they
+ * match. */
+static_assert(LVDA_EDID_BLOCK == EDID_LENGTH);
+static_assert(LVDA_EDID_EXT_CTA == CEA_EXT);
+static_assert(LVDA_EDID_EXT_DISPLAYID == DISPLAYID_EXT);
+static_assert(LVDA_EDID_DESC_RANGE == EDID_DETAIL_MONITOR_RANGE);
+static_assert(LVDA_EDID_DESC_NAME == EDID_DETAIL_MONITOR_NAME);
+static_assert(LVDA_EDID_DESC_LEN == sizeof(struct detailed_timing));
+static_assert(LVDA_EDID_NAME_CHARS == sizeof_field(struct detailed_data_string, str));
+static_assert(LVDA_EDID_INPUT_DIGITAL == DRM_EDID_INPUT_DIGITAL);
+static_assert(LVDA_EDID_DEPTH_8 == DRM_EDID_DIGITAL_DEPTH_8);
+static_assert(LVDA_EDID_DEPTH_10 == DRM_EDID_DIGITAL_DEPTH_10);
+static_assert(LVDA_EDID_TYPE_DP == DRM_EDID_DIGITAL_TYPE_DP);
+static_assert(LVDA_EDID_FEATURE_STANDBY == DRM_EDID_FEATURE_PM_STANDBY);
+static_assert(LVDA_EDID_FEATURE_STD_COLOR == DRM_EDID_FEATURE_STANDARD_COLOR);
+static_assert(LVDA_EDID_FEATURE_PREFERRED == DRM_EDID_FEATURE_PREFERRED_TIMING);
+static_assert(LVDA_EDID_FEATURE_CONT_FREQ == DRM_EDID_FEATURE_CONTINUOUS_FREQ);
+static_assert(LVDA_EDID_PT_HSYNC_POS == DRM_EDID_PT_HSYNC_POSITIVE);
+static_assert(LVDA_EDID_PT_VSYNC_POS == DRM_EDID_PT_VSYNC_POSITIVE);
+static_assert(LVDA_EDID_PT_SEPARATE_SYNC == DRM_EDID_PT_SEPARATE_SYNC);
+static_assert(LVDA_EDID_RANGE_LIMITS_ONLY == DRM_EDID_RANGE_LIMITS_ONLY_FLAG);
+static_assert(LVDA_EDID_RANGE_OFF_MAX_VFREQ == DRM_EDID_RANGE_OFFSET_MAX_VFREQ);
+static_assert(LVDA_EDID_RANGE_OFF_MAX_HFREQ == DRM_EDID_RANGE_OFFSET_MAX_HFREQ);
+
+/* One virtual monitor = one full {plane, CRTC, encoder, connector} chain. */
 struct lvda_monitor {
 	struct drm_plane primary;
 	struct drm_crtc crtc;
@@ -58,9 +78,7 @@ struct lvda_device {
 #define to_lvda(dev)	  container_of(dev, struct lvda_device, drm)
 #define to_monitor(conn)  container_of(conn, struct lvda_monitor, connector)
 
-/* The single persistent card. Set under no lock: registered before the
- * /dev/lvda misc node accepts ioctls and cleared only at module_exit, which
- * the file-ops module owner blocks until every fd is closed. */
+/* The single persistent card. */
 static struct lvda_device *lvda_card;
 
 static const u32 lvda_primary_formats[] = {
@@ -209,14 +227,7 @@ static const struct drm_mode_config_helper_funcs lvda_mode_config_helpers = {
 
 DEFINE_DRM_GEM_FOPS(lvda_fops);
 
-/*
- * Align the dumb-buffer scanout pitch to 256 bytes. The shmem helper defaults
- * the pitch to width * cpp, which is only as aligned as the width itself. A
- * streaming host imports the scanned-out framebuffer as a dma-buf and feeds it
- * to a GPU video encoder; those importers (e.g. amdgpu) require a 256-byte
- * pitch. Without this a width not divisible by 64 (e.g. 2400 -> pitch 9600)
- * yields a buffer the encoder rejects, so capture produces no frames.
- */
+/* Dumb-buffer scanout pitch alignment, in bytes. */
 #define LVDA_FB_PITCH_ALIGN 256u
 
 static int lvda_dumb_create(struct drm_file *file, struct drm_device *drm,
@@ -243,8 +254,6 @@ static int lvda_dumb_create(struct drm_file *file, struct drm_device *drm,
 
 	args->pitch = (u32)pitch;
 
-	/* Allocate the object at the aligned pitch directly: the shmem dumb
-	 * helper recomputes (and shrinks) the pitch back to width * cpp. */
 	shmem = drm_gem_shmem_create(drm, (size_t)size);
 	if (IS_ERR(shmem))
 		return PTR_ERR(shmem);
@@ -272,7 +281,7 @@ static const struct drm_driver lvda_drm_driver = {
 };
 
 /* Reject a monitor name with non-printable bytes or one longer than the EDID
- * monitor-name descriptor holds. Empty is valid (the synth defaults to lvda). */
+ * monitor-name descriptor holds. Empty is valid. */
 static int lvda_validate_name(const __u8 name[16])
 {
 	unsigned int n;
@@ -366,7 +375,7 @@ static int lvda_init_monitor(struct lvda_device *ldev, unsigned int i)
 
 	drm_crtc_helper_add(&mon->crtc, &lvda_crtc_helper_funcs);
 
-	/* VRR_ENABLED lets the compositor toggle adaptive sync on the CRTC. */
+	/* VRR_ENABLED atomic CRTC property. */
 	drm_object_attach_property(&mon->crtc.base,
 				   drm->mode_config.prop_vrr_enabled, 0);
 
@@ -391,10 +400,7 @@ static int lvda_init_monitor(struct lvda_device *ldev, unsigned int i)
 
 	drm_connector_attach_edid_property(&mon->connector);
 
-	/* Capability properties a compositor reads off the connector. The
-	 * per-monitor EDID gates HDR / wide color gamut: BT.2020 + PQ ride in
-	 * the EDID only when LVDA_F_HDR is set, so those light up on HDR
-	 * monitors and stay incapable on SDR ones. VRR is always advertised. */
+	/* Capability properties a compositor reads off the connector. */
 	ret = drm_connector_attach_vrr_capable_property(&mon->connector);
 	if (ret)
 		return ret;
@@ -453,10 +459,7 @@ int lvda_card_register(struct device *parent, unsigned int n_monitors)
 
 	drm_mode_config_reset(drm);
 
-	/* "max bpc" needs the connector state drm_mode_config_reset() just
-	 * created. Advertise 8..10 bpc — the depths the scanout formats cover
-	 * (XRGB8888 / XBGR2101010) — so the output reports a real color
-	 * resolution rather than "unknown". */
+	/* Advertise 8..10 bpc on each connector. */
 	for (i = 0; i < n_monitors; i++) {
 		ret = drm_connector_attach_max_bpc_property(
 			&ldev->monitors[i].connector, 8, 10);

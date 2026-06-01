@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
- * SPEC §15.2 add/remove: the lvda card is persistent. LVDA_IOC_ADD a
+ * The lvda card is persistent. LVDA_IOC_ADD a
  * 1920x1080@60 SDR monitor, assert its connector reports "connected" and the
  * card node exists; LVDA_IOC_REMOVE it, assert the connector reports
  * "disconnected" and the card node STILL exists (it is never destroyed).

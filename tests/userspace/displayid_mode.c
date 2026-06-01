@@ -1,9 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
- * SPEC §15.2 DisplayID mode: ADD a 3840x2160@120 monitor — a mode whose
- * pixel clock (~1.1 GHz) exceeds the base EDID detailed-timing descriptor —
- * and assert the kernel parsed the synthesized DisplayID Type I timing into a
- * 3840x2160@~120 connector mode. Skip with success when /dev/lvda or the
+ * DisplayID mode: ADD a 3840x2160@120 monitor and assert the kernel parsed
+ * the synthesized DisplayID Type I timing into a 3840x2160@~120 connector
+ * mode. Skip with success when /dev/lvda or the
  * lvda DRM card is absent.
  */
 

@@ -61,3 +61,9 @@ The virtual card behaves like a real GPU with hotpluggable outputs. A Wayland
 compositor that supports multi-GPU (KWin, wlroots / Hyprland) adopts the card
 at startup, and when a monitor is added a new output appears at the client's
 exact mode. Point your capture (`kmsgrab`) at that output and encode it.
+
+The driver allocates each scanout buffer with a **256-byte pitch alignment**.
+Capture imports the framebuffer as a dma-buf and feeds it to a GPU video
+encoder; importers such as amdgpu require that alignment, so a width not
+divisible by 64 (e.g. 2400) would otherwise yield a buffer the encoder rejects
+and capture would produce no frames.

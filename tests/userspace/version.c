@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
- * SPEC §15.2 version: LVDA_IOC_VERSION reports the protocol major and
+ * LVDA_IOC_VERSION reports the protocol major and
  * advertises HDR support in flags. Skip with success when /dev/lvda is
  * absent.
  */

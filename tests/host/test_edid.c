@@ -2,7 +2,7 @@
 
 /*
  * Host-side conformance harness for the deterministic EDID synthesizer.
- * Links lvda_edid.c directly (see Makefile) and exercises the §15.1
+ * Links lvda_edid.c directly (see Makefile) and exercises the synthesizer
  * invariants without any kernel headers. Prints PASS/FAIL per check and
  * exits non-zero if any check fails.
  *
@@ -22,7 +22,7 @@
 
 #include "../../module/lvda_edid.h"
 
-/* Base-block field offsets (lvda-SPEC.md §6). */
+/* Base-block field offsets. */
 #define OFF_SERIAL	0x0C	/* siphash24(client_id) truncated u32 */
 #define OFF_VIDEO_IN	0x14	/* 0x80 | (depth<<4) | 0x05 */
 #define OFF_CHROMA	0x19	/* 10 bytes BT.709 (SDR) / BT.2020 (HDR) */
@@ -35,7 +35,7 @@
 #define OFF_VSIZE_CM	0x16	/* base block physical height (cm) */
 #define OFF_NAME	0x5F	/* monitor-name descriptor text (0x5A + 5) */
 
-/* CTA extended data-block tag for HDR Static Metadata (§6). */
+/* CTA extended data-block tag for HDR Static Metadata. */
 #define CTA_EXT_HDR	0x06
 
 static int failures;
@@ -207,11 +207,8 @@ static void edid_decode_warn(const u8 *e, int len, const char *name)
 		       name, status);
 }
 
-/* The 'ambient' case: an all-zero client_id is a documented sentinel
- * meaning 'no caller identity supplied'. The kernel maps it to serial 0
- * (lvda module/lvda_edid.c §6.1) so userspace templates (e.g. a GDM
- * monitors.xml that pins the ambient lvda connector) can match against
- * a stable identity without depending on KEY. */
+/* All-zero client_id is the sentinel for "no caller identity"; the kernel
+ * maps it to EDID serial 0. */
 static void check_ambient_serial_zero(void)
 {
 	static const u8 ID_ZERO[16] = {0};

@@ -2,8 +2,7 @@
 /*
  * lvda module entry: /dev/lvda miscdevice, ioctl dispatch, and per-fd
  * monitor ownership. The DRM card is persistent (registered at module load);
- * a monitor lives exactly as long as the /dev/lvda file that added it
- * (lvda-SPEC.md §5.5, §8).
+ * a monitor lives exactly as long as the /dev/lvda file that added it.
  */
 
 #include <linux/module.h>
@@ -21,7 +20,7 @@ module_param(lvda_max_monitors, uint, 0444);
 MODULE_PARM_DESC(lvda_max_monitors,
 		 "virtual monitors the card exposes (1..32, default 1; raise only for multiple simultaneous streaming clients)");
 
-/* DRM parent for the persistent card; outlives it (§8). */
+/* DRM parent for the persistent card; outlives it. */
 static struct platform_device *lvda_parent;
 
 static int lvda_release(struct inode *inode, struct file *file)

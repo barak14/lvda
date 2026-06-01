@@ -5,7 +5,7 @@
 /*
  * Internal kernel-side contract between lvda_main.c (char device + ioctl
  * + per-fd monitor ownership) and lvda_kms.c (the persistent DRM card and
- * its on-demand virtual monitors). See lvda-SPEC.md §8, §9.
+ * its on-demand virtual monitors).
  */
 
 #include <linux/build_bug.h>
@@ -16,30 +16,24 @@
 struct device;
 
 /* Pool size: number of virtual monitors the persistent card can light up at
- * once (lvda-SPEC.md §11). Defined, with its module_param(), in
- * lvda_main.c; consumed by lvda_card_register(). */
+ * once. Defined, with its module_param(), in lvda_main.c; consumed by
+ * lvda_card_register(). */
 extern unsigned int lvda_max_monitors;
 
 #define LVDA_MAX_MONITORS 32u
 
-/*
- * Each monitor's plane/encoder gets a BIT(slot) crtc mask; possible_crtcs and
- * possible_clones are 32-bit, so the slot count must stay within a u32 mask.
- * Raising this past 32 would silently overflow BIT(slot) at monitor init.
- */
+/* Slot count must fit the 32-bit BIT(slot) crtc mask. */
 static_assert(LVDA_MAX_MONITORS <= 32u, "monitor slot mask exceeds u32");
 
 /*
  * Register the single persistent DRM card with n_monitors pre-created virtual
  * monitors, all initially disconnected. parent is the module-lifetime
- * platform device used as the DRM parent (§8). The card stays registered
+ * platform device used as the DRM parent. The card stays registered
  * (/dev/dri/cardN live) for the module's lifetime. Returns 0 or -errno.
  */
 int lvda_card_register(struct device *parent, unsigned int n_monitors);
 
-/* Unregister and drop the persistent card. DRM refcounting keeps the
- * underlying drm_device alive until other holders (an open /dev/dri/cardN)
- * release it; the file-ops module owner pins the module until then. */
+/* Unregister and drop the persistent card. */
 void lvda_card_unregister(void);
 
 /*
@@ -61,8 +55,7 @@ int lvda_monitor_add(void *owner, const struct lvda_add *req,
  * monitor_id is out of range or not owned by owner. */
 int lvda_monitor_remove(void *owner, __u32 monitor_id);
 
-/* Best-effort rollback for ADD after userspace copy-out failure. The generation
- * prevents deleting a newer monitor that reused the same slot on the same fd. */
+/* Best-effort rollback for ADD after a userspace copy-out failure. */
 void lvda_monitor_abort_add(void *owner, __u32 monitor_id, __u64 generation);
 
 /* Disable every monitor owned by owner (called on /dev/lvda close). */

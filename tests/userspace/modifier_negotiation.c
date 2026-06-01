@@ -1,10 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
- * SPEC §15.2 modifier negotiation: ADD a monitor, open the lvda DRM card,
- * walk the primary plane IN_FORMATS blob, and assert the modifier set is
- * exactly {DRM_FORMAT_MOD_LINEAR} and the format set contains the three
- * formats of §10 (XRGB8888, ARGB8888, XBGR2101010). Skip with success
- * when /dev/lvda or the lvda DRM card is absent.
+ * ADD a monitor, open the lvda DRM card, walk the primary plane IN_FORMATS
+ * blob, and assert the modifier set is exactly {DRM_FORMAT_MOD_LINEAR} and
+ * the format set contains the three formats XRGB8888, ARGB8888, XBGR2101010.
+ * Skip with success when /dev/lvda or the lvda DRM card is absent.
  */
 
 #define _POSIX_C_SOURCE 200809L
@@ -140,7 +139,7 @@ int main(void)
 			(const struct drm_format_modifier *)
 				((const char *)fb + fb->modifiers_offset);
 
-		/* Every advertised modifier must be LINEAR (§10). */
+		/* Every advertised modifier must be LINEAR. */
 		for (uint32_t m = 0; m < fb->count_modifiers; m++) {
 			if (mods[m].modifier != DRM_FORMAT_MOD_LINEAR) {
 				fprintf(stderr,
@@ -151,7 +150,7 @@ int main(void)
 			}
 		}
 
-		/* Required §10 formats must all be present. */
+		/* Required formats must all be present. */
 		int has_xrgb = 0, has_argb = 0, has_xbgr2101010 = 0;
 		for (uint32_t f = 0; f < fb->count_formats; f++) {
 			switch (fmts[f]) {

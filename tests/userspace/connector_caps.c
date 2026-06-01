@@ -1,13 +1,11 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
  * Connector capability properties: ADD a monitor on the lvda card, then
- * assert every connector exposes the optional capability properties a
- * compositor reads to advertise features — vrr_capable (immutable, == 1),
- * Colorspace (enum carrying BT2020_RGB and BT2020_YCC), HDR_OUTPUT_METADATA
- * (blob) — and that every CRTC exposes the atomic VRR_ENABLED property. These
- * are attached at connector init independent of LVDA_F_HDR, so flags == 0
- * still exercises them. Skip with success when /dev/lvda or the lvda DRM card
- * is absent.
+ * assert every connector exposes the optional capability properties —
+ * vrr_capable (immutable, == 1), Colorspace (enum carrying BT2020_RGB and
+ * BT2020_YCC), HDR_OUTPUT_METADATA (blob) — and that every CRTC exposes the
+ * atomic VRR_ENABLED property. Skip with success when /dev/lvda or the lvda
+ * DRM card is absent.
  */
 
 #define _POSIX_C_SOURCE 200809L
@@ -139,7 +137,7 @@ int main(void)
 	}
 	drmFreeVersion(ver);
 
-	/* VRR_ENABLED is an atomic CRTC property — only listed with the cap. */
+	/* VRR_ENABLED is an atomic CRTC property. */
 	if (drmSetClientCap(fd, DRM_CLIENT_CAP_ATOMIC, 1) != 0) {
 		printf("SKIP: atomic cap unavailable: %s\n", strerror(errno));
 		close(fd);

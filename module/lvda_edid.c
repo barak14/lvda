@@ -1,9 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Deterministic EDID synthesizer (lvda-SPEC.md §6). Dual-build: the same
- * translation unit is linked into the kernel module and the host test
- * binary, so it leans only on memset/memcpy and the fixed-width typedefs
- * from lvda_edid.h. No floating point, no allocation.
+ * Deterministic EDID synthesizer. Built into both the kernel module and the
+ * host test binary; uses only memset/memcpy and the fixed-width typedefs from
+ * lvda_edid.h.
  */
 
 #ifdef __KERNEL__
@@ -15,7 +14,7 @@
 #endif
 #include "lvda_edid.h"
 
-/* §6.1: salts the 32-bit EDID serial. Exactly 16 bytes, no NUL. */
+/* Salts the 32-bit EDID serial. Exactly 16 bytes, no NUL. */
 static const u8 KEY[16] = {
 	'l', 'v', 'd', 'a', 'c', '-', 's', 'r',
 	'l', '-', 'k', 'e', 'y', '-', 'v', '1',
@@ -80,7 +79,7 @@ static u64 siphash24(const u8 *key, const u8 *msg, u32 len)
 	return v0 ^ v1 ^ v2 ^ v3;
 }
 
-/* ---- CVT Reduced-Blanking v1 (§6.3) ---- */
+/* ---- CVT Reduced-Blanking v1 ---- */
 
 struct lvda_timing {
 	u32 hdisplay;	/* exact requested width */
@@ -97,8 +96,7 @@ struct lvda_timing {
 #define LVDA_EDID_MIN_PCLK_KHZ 10u
 
 /* CVT vsync width (lines) from the aspect ratio of the blanking-rounded
- * width against the active height; see drm_cvt_mode().
- */
+ * width against the active height. */
 static u32 cvt_vsync(u32 hbase, u32 vdisp)
 {
 	if (vdisp % 3 == 0 && vdisp * 4 / 3 == hbase)
@@ -156,9 +154,9 @@ static int cvt_rb_v1(u32 width, u32 height, u32 refresh_mhz,
 	return 0;
 }
 
-/* ---- Base block (§6.1) ---- */
+/* ---- Base block ---- */
 
-/* §6.1: precomputed 10-bit chromaticity packings (no runtime FP). */
+/* Precomputed 10-bit chromaticity packings. */
 static const u8 CHROMA_BT709[10] = {
 	0xEE, 0x91, 0xA3, 0x54, 0x4C, 0x99, 0x26, 0x0F, 0x50, 0x54,
 };
@@ -216,7 +214,8 @@ static void build_dtd(const struct lvda_timing *t, u8 h_cm, u8 v_cm, u8 d[18])
 	d[14] = (u8)((((h_mm >> 8) & 0xF) << 4) | ((v_mm >> 8) & 0xF));
 	d[15] = 0;	/* h border */
 	d[16] = 0;	/* v border */
-	d[17] = 0x1E;	/* digital separate sync, hsync+ / vsync+ */
+	d[17] = LVDA_EDID_PT_SEPARATE_SYNC | LVDA_EDID_PT_HSYNC_POS |
+		LVDA_EDID_PT_VSYNC_POS;
 }
 
 static void build_range_limits(const struct lvda_timing *t, u32 refresh_mhz,
@@ -226,36 +225,36 @@ static void build_range_limits(const struct lvda_timing *t, u32 refresh_mhz,
 	u32 hrate_khz = (t->pixel_clock_khz + t->htotal / 2) / t->htotal;
 	u32 max_pclk_10mhz = (t->pixel_clock_khz + 9999) / 10000;
 	u8 vmax, hmax, offsets = 0;
-	int i;
+	u32 i;
 
 	if (v_hz < 1)
 		v_hz = 1;
 	/* EDID 1.4 rate fields are 8-bit; the byte-4 +255 offset flags extend
 	 * the max to 510 so the descriptor still covers DisplayID-class modes. */
 	if (v_hz > 0xFF) {
-		offsets |= 0x02;	/* DRM_EDID_RANGE_OFFSET_MAX_VFREQ */
+		offsets |= LVDA_EDID_RANGE_OFF_MAX_VFREQ;
 		vmax = (v_hz - 255 > 0xFF) ? 0xFF : (u8)(v_hz - 255);
 	} else {
 		vmax = (u8)v_hz;
 	}
 	if (hrate_khz > 0xFF) {
-		offsets |= 0x08;	/* DRM_EDID_RANGE_OFFSET_MAX_HFREQ */
+		offsets |= LVDA_EDID_RANGE_OFF_MAX_HFREQ;
 		hmax = (hrate_khz - 255 > 0xFF) ? 0xFF : (u8)(hrate_khz - 255);
 	} else {
 		hmax = (u8)hrate_khz;
 	}
 
-	memset(d, 0, 18);
-	d[3] = 0xFD;		/* display range limits tag */
+	memset(d, 0, LVDA_EDID_DESC_LEN);
+	d[3] = LVDA_EDID_DESC_RANGE;
 	d[4] = offsets;		/* 1.4 max-rate +255 offset flags */
 	d[5] = 1;		/* min vertical rate (Hz) */
 	d[6] = vmax;		/* max vertical rate (Hz; +255 when flagged) */
 	d[7] = 1;		/* min horizontal rate (kHz) */
 	d[8] = hmax;		/* max horizontal rate (kHz; +255 when flagged) */
 	d[9] = (max_pclk_10mhz > 0xFF) ? 0xFF : (u8)max_pclk_10mhz;
-	d[10] = 0x01;		/* video timing support: Range Limits Only */
+	d[10] = LVDA_EDID_RANGE_LIMITS_ONLY;
 	d[11] = 0x0A;		/* line feed */
-	for (i = 12; i < 18; i++)
+	for (i = 12; i < LVDA_EDID_DESC_LEN; i++)
 		d[i] = 0x20;
 }
 
@@ -267,23 +266,23 @@ static void build_name_descriptor(const char *name, u8 d[18])
 	if (!name || !name[0])
 		name = fallback;
 
-	memset(d, 0, 18);
-	d[3] = 0xFC;		/* monitor name tag */
-	while (n < 13 && name[n]) {
+	memset(d, 0, LVDA_EDID_DESC_LEN);
+	d[3] = LVDA_EDID_DESC_NAME;
+	while (n < LVDA_EDID_NAME_CHARS && name[n]) {
 		d[5 + n] = (u8)name[n];
 		n++;
 	}
 	i = 5 + n;
-	if (n < 13)
+	if (n < LVDA_EDID_NAME_CHARS)
 		d[i++] = 0x0A;	/* line-feed terminator when < 13 chars */
-	while (i < 18)
+	while (i < LVDA_EDID_DESC_LEN)
 		d[i++] = 0x20;	/* space padding */
 }
 
 static void build_dummy_descriptor(u8 d[18])
 {
-	memset(d, 0, 18);
-	d[3] = 0x10;		/* dummy descriptor tag */
+	memset(d, 0, LVDA_EDID_DESC_LEN);
+	d[3] = LVDA_EDID_DESC_DUMMY;
 }
 
 static u8 edid_checksum(const u8 *block)
@@ -291,7 +290,7 @@ static u8 edid_checksum(const u8 *block)
 	u32 sum = 0;
 	u32 i;
 
-	for (i = 0; i < 127; i++)
+	for (i = 0; i < LVDA_EDID_BLOCK - 1; i++)
 		sum += block[i];
 	return (u8)((256 - (sum & 0xFF)) & 0xFF);
 }
@@ -308,12 +307,7 @@ static void build_base_block(const struct lvda_edid_params *p,
 	u32 pnp = (((u32)('L' - '@') & 0x1F) << 10) |
 		  (((u32)('V' - '@') & 0x1F) << 5) |
 		  ((u32)('D' - '@') & 0x1F);
-	/* §6.1: the EDID serial is normally siphash24(KEY, client_id, 16),
-	 * giving a stable per-client identity that's salt-dependent. As a
-	 * documented sentinel for 'no caller identity supplied', an all-zero
-	 * client_id maps to serial 0; this lets userspace templates (e.g.
-	 * display-manager monitors.xml configs that pin the ambient lvda
-	 * connector) target a stable identity without depending on KEY. */
+	/* EDID serial: siphash24(KEY, client_id), or 0 for an all-zero client_id. */
 	u32 serial = 0;
 	{
 		int i;
@@ -323,11 +317,12 @@ static void build_base_block(const struct lvda_edid_params *p,
 				break;
 			}
 	}
-	u8 depth = (p->hdr || p->deep_color) ? 0x3 : 0x2;	/* 10 / 8 bpc */
+	u8 depth_bits = (p->hdr || p->deep_color) ?
+			LVDA_EDID_DEPTH_10 : LVDA_EDID_DEPTH_8;
 	u8 h_cm = phys_cm(p->phys_width_mm, p->width);
 	u8 v_cm = phys_cm(p->phys_height_mm, p->height);
 
-	memset(b, 0, 128);
+	memset(b, 0, LVDA_EDID_BLOCK);
 	memcpy(b, header, 8);
 
 	b[0x08] = (u8)((pnp >> 8) & 0xFF);	/* big-endian PNP */
@@ -342,14 +337,16 @@ static void build_base_block(const struct lvda_edid_params *p,
 	b[0x11] = 36;		/* year = 2026 - 1990 */
 	b[0x12] = 0x01;		/* EDID version */
 	b[0x13] = 0x04;		/* EDID revision */
-	b[0x14] = (u8)(0x80 | (depth << 4) | 0x05);	/* digital, DP */
+	b[0x14] = (u8)(LVDA_EDID_INPUT_DIGITAL | depth_bits | LVDA_EDID_TYPE_DP);
 	b[0x15] = h_cm;
 	b[0x16] = v_cm;
 	b[0x17] = 120;		/* gamma 2.2 */
-	/* standby + sRGB-default(iff SDR) + preferred-native(iff the base DTD
-	 * carries the real mode) + cont-freq. 0x80 = standby (cosmetic). */
-	b[0x18] = (u8)(0x80 | (p->hdr ? 0 : 0x04) |
-		       (preferred ? 0x02 : 0) | 0x01);
+	/* Standby (cosmetic) + sRGB default (SDR only) + preferred native
+	 * timing (when the base DTD carries the real mode) + continuous freq. */
+	b[0x18] = (u8)(LVDA_EDID_FEATURE_STANDBY |
+		       (p->hdr ? 0 : LVDA_EDID_FEATURE_STD_COLOR) |
+		       (preferred ? LVDA_EDID_FEATURE_PREFERRED : 0) |
+		       LVDA_EDID_FEATURE_CONT_FREQ);
 	memcpy(b + 0x19, p->hdr ? CHROMA_BT2020 : CHROMA_BT709, 10);
 	b[0x23] = 0x20;		/* established timings I: 640x480@60 */
 	b[0x24] = 0x00;
@@ -365,14 +362,14 @@ static void build_base_block(const struct lvda_edid_params *p,
 	b[0x7F] = edid_checksum(b);
 }
 
-/* ---- CTA-861 extension (§6.2) ---- */
+/* ---- CTA-861 extension ---- */
 
 static void build_cta_block(const struct lvda_edid_params *p, u8 *b)
 {
 	u32 q = 4;
 
-	memset(b, 0, 128);
-	b[0x00] = 0x02;		/* CTA extension tag */
+	memset(b, 0, LVDA_EDID_BLOCK);
+	b[0x00] = LVDA_EDID_EXT_CTA;
 	b[0x01] = 0x03;		/* CTA revision 3 */
 	b[0x03] = 0x00;		/* no native DTDs, no audio/YCbCr claims */
 
@@ -402,9 +399,8 @@ static void build_cta_block(const struct lvda_edid_params *p, u8 *b)
 	b[0x7F] = edid_checksum(b);
 }
 
-/* DisplayID Type I detailed timing (lvda-SPEC.md §6.4): 24-bit pixel clock
- * (10 kHz units) + 16-bit active fields, so it encodes any mode the base DTD
- * cannot. Carried in its own EDID extension block (tag 0x70). */
+/* DisplayID Type I detailed timing: 24-bit pixel clock (10 kHz units) +
+ * 16-bit active fields, carried in its own EDID extension block (tag 0x70). */
 #define LVDA_DTD_MAX_PCLK_KHZ 655350u		/* base DTD: u16 × 10 kHz */
 #define LVDA_DID_MAX_PCLK_KHZ 167772160u	/* DisplayID: 24-bit × 10 kHz */
 
@@ -442,8 +438,8 @@ static void build_displayid_block(const struct lvda_edid_params *p,
 	if (aspect > 355)		/* (ratio-1)*100 must fit the u8 field */
 		aspect = 355;
 
-	memset(b, 0, 128);
-	b[0x00] = 0x70;		/* DISPLAYID_EXT */
+	memset(b, 0, LVDA_EDID_BLOCK);
+	b[0x00] = LVDA_EDID_EXT_DISPLAYID;
 
 	/* DisplayID base-section header. */
 	b[0x01] = 0x12;		/* structure version 1.2 */
@@ -526,9 +522,8 @@ int lvda_synth_edid(const struct lvda_edid_params *p,
 		return LVDA_EDID_BASE_SIZE;
 	}
 
-	/* Too large for the base DTD: carry the real mode in a DisplayID block,
-	 * leaving a representable 1080p60 fallback in the non-preferred DTD. The
-	 * base range-limits descriptor still reflects the real mode. */
+	/* Mode too large for the base DTD: carry it in a DisplayID block with a
+	 * 1080p60 fallback in the non-preferred base DTD. */
 	if (t.pixel_clock_khz > LVDA_DID_MAX_PCLK_KHZ)
 		return -EOVERFLOW;
 

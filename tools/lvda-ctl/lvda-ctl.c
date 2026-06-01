@@ -1,12 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
- * lvda-ctl — userspace CLI driving /dev/lvda. SPEC §13/§14.
- *
- * The virtual display lives for exactly as long as some process keeps the
- * /dev/lvda fd open: there is no destroy ioctl (UAPI §5). `up` therefore
- * CREATEs the display, forks a daemon that parks on the fd, and lets the
- * parent return to the shell. The fd — not a ping heartbeat — is the
- * liveness signal; closing it reaps the display.
+ * lvda-ctl — userspace CLI driving /dev/lvda. The virtual display lives for
+ * as long as some process keeps the /dev/lvda fd open. `up` creates the
+ * display, forks a daemon that parks on the fd, and returns to the shell;
+ * `down` terminates that daemon; `status` lists live displays.
  */
 
 #define _GNU_SOURCE
@@ -136,9 +133,8 @@ static int write_atomic(const char *path, const char *content)
 
 /*
  * FNV-1a 128-bit over the given NUL-terminated parts, little-endian output.
- * SPEC §8.1: a strong hash (blake3) would be overkill — client_id only salts
- * the EDID serial, and the kernel hashes it again. A 0xff domain separator
- * between parts keeps ("a","bc") distinct from ("ab","c").
+ * A 0xff domain separator between parts keeps ("a","bc") distinct from
+ * ("ab","c").
  */
 static void fnv1a_128(const char *const parts[], size_t nparts, uint8_t out[16])
 {

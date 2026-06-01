@@ -2,7 +2,7 @@
 #
 # Host build of the EDID synthesizer conformance harness. Compiles the
 # synthesizer source directly into a standalone userspace binary; no
-# kernel headers, no module build. See lvda-SPEC.md §15.1.
+# kernel headers, no module build.
 
 CC      ?= cc
 CFLAGS  ?= -std=c11 -Wall -Wextra -I../../module

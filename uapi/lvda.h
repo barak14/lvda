@@ -4,7 +4,7 @@
 
 /*
  * lvda userspace ABI. Single source of truth — the module #includes this
- * header directly; there is no second declaration. See lvda-SPEC.md §5.
+ * header directly; there is no second declaration.
  *
  * Model: the module registers ONE persistent DRM card at load time, holding a
  * fixed pool of virtual monitors that all start disconnected. LVDA_IOC_ADD
@@ -29,13 +29,9 @@
 #define LVDA_F_ALL   (LVDA_F_HDR | LVDA_F_10BPC)
 
 /*
- * Inclusive request bounds. LVDA_DIM_MAX is a driver policy ceiling that
- * bounds the scanout buffer a compositor pins when it adopts the monitor's
- * preferred mode (height * ALIGN(width * 4, 256) bytes), not an EDID encoding
- * limit. The synthesized timing rides in the base detailed-timing descriptor,
- * or in DisplayID when its 12-bit active fields / 16-bit pixel clock cannot
- * hold it. Out-of-range dimensions or refresh fail ADD with -EINVAL; a timing
- * whose pixel clock exceeds even DisplayID fails with -EOVERFLOW.
+ * Inclusive request bounds. Out-of-range dimensions or refresh fail ADD with
+ * -EINVAL; a timing whose pixel clock exceeds even DisplayID fails with
+ * -EOVERFLOW.
  */
 #define LVDA_DIM_MIN          1u
 #define LVDA_DIM_MAX          8192u
@@ -44,8 +40,8 @@
 
 /*
  * Physical-size bounds (millimetres) for lvda_add.phys_{width,height}_mm. Zero
- * means "derive from the pixel count at 96 DPI". A nonzero value is rounded to
- * the EDID base block's 1 cm granularity; the ceiling is the 255 cm (u8) field.
+ * derives the size from the pixel count at 96 DPI; a nonzero value is rounded
+ * to the EDID 1 cm granularity.
  */
 #define LVDA_PHYS_MM_MIN      10u
 #define LVDA_PHYS_MM_MAX      2550u

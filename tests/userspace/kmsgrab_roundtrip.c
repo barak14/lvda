@@ -1,10 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
- * SPEC §15.2 kmsgrab roundtrip: ADD a monitor, attach a LINEAR
- * framebuffer to the primary plane via an atomic modeset, read it back
- * with drmModeGetFB2(), and PRIME-export the buffer as a DMA-BUF. Assert
- * the DRM format and LINEAR modifier survive the round trip (the kmsgrab
- * capture path, §1, §7, §10). Skip with success when /dev/lvda, the
+ * kmsgrab roundtrip: ADD a monitor, attach a LINEAR framebuffer to the
+ * primary plane via an atomic modeset, read it back with drmModeGetFB2(),
+ * and PRIME-export the buffer as a DMA-BUF. Assert the DRM format and LINEAR
+ * modifier survive the round trip. Skip with success when /dev/lvda, the
  * lvda DRM card, or DRM-master/atomic is unavailable.
  */
 
