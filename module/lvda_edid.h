@@ -30,10 +30,14 @@ typedef uint64_t u64;
 
 struct lvda_edid_params {
 	const u8 *client_id;   /* 16 bytes; salts the EDID serial */
+	const char *name;      /* monitor name; NULL/empty -> "lvda"; <=13 chars */
 	u32 width;             /* active pixels, preserved exactly */
 	u32 height;            /* active lines, preserved exactly */
 	u32 refresh_mhz;       /* milli-Hz */
+	u32 phys_width_mm;     /* EDID physical width; 0 -> derive at 96 DPI */
+	u32 phys_height_mm;    /* EDID physical height; 0 -> derive at 96 DPI */
 	int hdr;               /* non-zero -> HDR10/PQ + BT.2020 + 10-bit */
+	int deep_color;        /* non-zero -> advertise 10-bit even for SDR */
 };
 
 /*

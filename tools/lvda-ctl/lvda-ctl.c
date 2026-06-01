@@ -309,8 +309,10 @@ static void run_daemon(int fd, const sigset_t *set, const char *pidfile,
 static int cmd_up(int argc, char **argv)
 {
 	long cli_w = -1, cli_h = -1, cli_fps = -1;
-	int cli_hdr = 0;
+	long cli_pw = -1, cli_ph = -1;
+	int cli_hdr = 0, cli_10bpc = 0;
 	const char *cli_cid = NULL;
+	const char *cli_name = NULL;
 	const char *pidfile = NULL;
 	const char *card_out = DEFAULT_CARD_OUT;
 	uint8_t client_id[16];
@@ -333,6 +335,14 @@ static int cmd_up(int argc, char **argv)
 			cli_fps = need_u32_arg(a, &i, argc, argv);
 		else if (!strcmp(a, "--hdr"))
 			cli_hdr = 1;
+		else if (!strcmp(a, "--10bit"))
+			cli_10bpc = 1;
+		else if (!strcmp(a, "--phys-width-mm"))
+			cli_pw = need_u32_arg(a, &i, argc, argv);
+		else if (!strcmp(a, "--phys-height-mm"))
+			cli_ph = need_u32_arg(a, &i, argc, argv);
+		else if (!strcmp(a, "--name"))
+			cli_name = need_str_arg(a, &i, argc, argv);
 		else if (!strcmp(a, "--client-id"))
 			cli_cid = need_str_arg(a, &i, argc, argv);
 		else if (!strcmp(a, "--pidfile"))
@@ -359,6 +369,9 @@ static int cmd_up(int argc, char **argv)
 	if (cli_hdr || env_bool("SUNSHINE_CLIENT_HDR"))
 		flags |= LVDA_F_HDR;
 
+	if (cli_10bpc || env_bool("SUNSHINE_CLIENT_10BPC"))
+		flags |= LVDA_F_10BPC;
+
 	memset(&req, 0, sizeof(req));
 	memcpy(req.client_id, client_id, sizeof(req.client_id));
 	req.width = resolve_u32(cli_w, "SUNSHINE_CLIENT_WIDTH", DEFAULT_WIDTH);
@@ -366,6 +379,18 @@ static int cmd_up(int argc, char **argv)
 	req.refresh_mhz =
 		resolve_u32(cli_fps, "SUNSHINE_CLIENT_FPS", DEFAULT_FPS) * 1000u;
 	req.flags = flags;
+	req.phys_width_mm =
+		resolve_u32(cli_pw, "SUNSHINE_CLIENT_PHYS_WIDTH_MM", 0);
+	req.phys_height_mm =
+		resolve_u32(cli_ph, "SUNSHINE_CLIENT_PHYS_HEIGHT_MM", 0);
+	{
+		const char *name = cli_name;
+
+		if (!name)
+			name = getenv("SUNSHINE_CLIENT_NAME");
+		if (name && name[0])
+			snprintf((char *)req.name, sizeof(req.name), "%s", name);
+	}
 
 	fd = open_device(&code);
 	if (fd < 0)
@@ -543,7 +568,8 @@ static void usage(FILE *f)
 {
 	fprintf(f,
 		"usage: %s <command> [options]\n"
-		"  up   [--width N] [--height N] [--fps N] [--hdr]\n"
+		"  up   [--width N] [--height N] [--fps N] [--hdr] [--10bit]\n"
+		"       [--phys-width-mm N] [--phys-height-mm N] [--name S]\n"
 		"       [--client-id <32hex>] [--pidfile P] [--card-out P]\n"
 		"  down --pidfile P\n"
 		"  status\n",

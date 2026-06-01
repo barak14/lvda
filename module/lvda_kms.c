@@ -271,6 +271,23 @@ static const struct drm_driver lvda_drm_driver = {
 	.patchlevel = 0,
 };
 
+/* Reject a monitor name with non-printable bytes or one longer than the EDID
+ * monitor-name descriptor holds. Empty is valid (the synth defaults to lvda). */
+static int lvda_validate_name(const __u8 name[16])
+{
+	unsigned int n;
+
+	for (n = 0; n < 16; n++) {
+		if (!name[n])
+			break;
+		if (name[n] < 0x20 || name[n] > 0x7E)
+			return -EINVAL;
+	}
+	if (n > LVDA_NAME_MAX)
+		return -EINVAL;
+	return 0;
+}
+
 static int lvda_validate_add(const struct lvda_add *req)
 {
 	if (req->width < LVDA_DIM_MIN || req->width > LVDA_DIM_MAX)
@@ -287,6 +304,19 @@ static int lvda_validate_add(const struct lvda_add *req)
 		return -EINVAL;
 
 	if (req->reserved[0] || req->reserved[1])
+		return -EINVAL;
+
+	if (req->phys_width_mm &&
+	    (req->phys_width_mm < LVDA_PHYS_MM_MIN ||
+	     req->phys_width_mm > LVDA_PHYS_MM_MAX))
+		return -EINVAL;
+
+	if (req->phys_height_mm &&
+	    (req->phys_height_mm < LVDA_PHYS_MM_MIN ||
+	     req->phys_height_mm > LVDA_PHYS_MM_MAX))
+		return -EINVAL;
+
+	if (lvda_validate_name(req->name))
 		return -EINVAL;
 
 	return 0;
@@ -478,10 +508,14 @@ int lvda_monitor_add(void *owner, const struct lvda_add *req,
 
 	len = lvda_synth_edid(&(struct lvda_edid_params) {
 		.client_id = req->client_id,
+		.name = req->name[0] ? (const char *)req->name : NULL,
 		.width = req->width,
 		.height = req->height,
 		.refresh_mhz = req->refresh_mhz,
+		.phys_width_mm = req->phys_width_mm,
+		.phys_height_mm = req->phys_height_mm,
 		.hdr = !!(req->flags & LVDA_F_HDR),
+		.deep_color = !!(req->flags & LVDA_F_10BPC),
 	}, edid_buf);
 	if (len < 0)
 		return len;

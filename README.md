@@ -33,10 +33,14 @@ lvda-ctl status                          # protocol version + live monitors
 lvda-ctl down --pidfile /run/lvda/s.pid  # closes the fd -> monitor removed
 ```
 
-Flags: `--width N --height N --fps N --hdr --client-id <32hex> --pidfile P
---card-out P`. With no size flags it falls back to the `SUNSHINE_CLIENT_WIDTH`
-/ `SUNSHINE_CLIENT_HEIGHT` / `SUNSHINE_CLIENT_FPS` / `SUNSHINE_CLIENT_HDR`
-environment variables, then to 1920x1080@60.
+Flags: `--width N --height N --fps N --hdr --10bit --phys-width-mm N
+--phys-height-mm N --name S --client-id <32hex> --pidfile P --card-out P`.
+`--10bit` advertises 10-bit color even for SDR; `--phys-*-mm` set the EDID
+physical size (omit to derive at 96 DPI); `--name` sets the monitor name
+(≤13 chars, default `lvda`). With no flags it falls back to the matching
+`SUNSHINE_CLIENT_*` environment variables (`…_WIDTH` / `…_HEIGHT` / `…_FPS` /
+`…_HDR` / `…_10BPC` / `…_PHYS_WIDTH_MM` / `…_PHYS_HEIGHT_MM` / `…_NAME`), then
+to 1920x1080@60 SDR.
 
 The card exposes one virtual connector by default (`cardN-Virtual-1`), normally
 `disconnected` like an unplugged HDMI port on a real GPU. While the daemon

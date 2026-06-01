@@ -31,6 +31,9 @@
 #define OFF_CTA		0x80	/* CTA-861 extension block */
 #define OFF_CTA_DTD	0x82	/* DBC end / DTD offset within extension */
 #define OFF_CTA_DBC	0x84	/* first data block */
+#define OFF_HSIZE_CM	0x15	/* base block physical width (cm) */
+#define OFF_VSIZE_CM	0x16	/* base block physical height (cm) */
+#define OFF_NAME	0x5F	/* monitor-name descriptor text (0x5A + 5) */
 
 /* CTA extended data-block tag for HDR Static Metadata (§6). */
 #define CTA_EXT_HDR	0x06
@@ -311,6 +314,53 @@ int main(int argc, char **argv)
 	      "hdr CTA carries HDR static-metadata block");
 	check(!cta_has_ext_block(sdr, CTA_EXT_HDR),
 	      "sdr CTA has no HDR static-metadata block");
+
+	/* 6b. Deep-color flag advertises 10-bit even for SDR colorimetry. */
+	{
+		struct lvda_edid_params p = {
+			.client_id = ID_A,
+			.width = 1920, .height = 1080, .refresh_mhz = 60000,
+			.deep_color = 1,
+		};
+		u8 e[LVDA_EDID_SIZE];
+
+		rc = lvda_synth_edid(&p, e);
+		check(rc > 0 && video_depth(e) == 3,
+		      "deep_color SDR video depth == 10bpc (011)");
+		check(rc > 0 && !cta_has_ext_block(e, CTA_EXT_HDR),
+		      "deep_color SDR has no HDR static-metadata block");
+	}
+
+	/* 6c. Caller physical size overrides the 96-DPI derivation, rounded to
+	 * the EDID base block's centimetre granularity. */
+	{
+		struct lvda_edid_params p = {
+			.client_id = ID_A,
+			.width = 1920, .height = 1080, .refresh_mhz = 60000,
+			.phys_width_mm = 700, .phys_height_mm = 390,
+		};
+		u8 e[LVDA_EDID_SIZE];
+
+		rc = lvda_synth_edid(&p, e);
+		check(rc > 0 && e[OFF_HSIZE_CM] == 70 && e[OFF_VSIZE_CM] == 39,
+		      "caller physical size -> 70x39 cm");
+	}
+
+	/* 6d. Caller monitor name lands in the name descriptor. */
+	{
+		struct lvda_edid_params p = {
+			.client_id = ID_A,
+			.width = 1920, .height = 1080, .refresh_mhz = 60000,
+			.name = "Vibeshine",
+		};
+		u8 e[LVDA_EDID_SIZE];
+
+		rc = lvda_synth_edid(&p, e);
+		check(rc > 0 && memcmp(e + OFF_NAME, "Vibeshine", 9) == 0,
+		      "caller monitor name in descriptor");
+		check(rc > 0 && sum_block(e, 0x00) == 0,
+		      "named base block checksum still valid");
+	}
 
 	/* 7. Range validation. */
 	check(synth(ID_A, 0, 1080, 60000, 0, b) == -EINVAL,

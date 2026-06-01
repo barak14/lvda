@@ -175,6 +175,15 @@ static u8 clamp_u8_min1(u32 v)
 	return (u8)v;
 }
 
+/* Physical extent in EDID centimetre units: caller millimetres rounded to the
+ * nearest cm, or derived from the pixel count at 96 DPI when unset. */
+static u8 phys_cm(u32 phys_mm, u32 pixels)
+{
+	if (phys_mm)
+		return clamp_u8_min1((phys_mm + 5) / 10);
+	return clamp_u8_min1((u32)((u64)pixels * 254 / (96 * 100)));
+}
+
 static void build_dtd(const struct lvda_timing *t, u8 h_cm, u8 v_cm, u8 d[18])
 {
 	u32 pclk = t->pixel_clock_khz / 10;	/* 10 kHz units */
@@ -250,18 +259,25 @@ static void build_range_limits(const struct lvda_timing *t, u32 refresh_mhz,
 		d[i] = 0x20;
 }
 
-static void build_name_descriptor(u8 d[18])
+static void build_name_descriptor(const char *name, u8 d[18])
 {
-	static const char name[] = "lvda";
-	u32 n = (u32)(sizeof(name) - 1);	/* 4 */
-	u32 i;
+	static const char fallback[] = "lvda";
+	u32 n = 0, i;
+
+	if (!name || !name[0])
+		name = fallback;
 
 	memset(d, 0, 18);
 	d[3] = 0xFC;		/* monitor name tag */
-	memcpy(d + 5, name, n);
-	d[5 + n] = 0x0A;
-	for (i = 5 + n + 1; i < 18; i++)
-		d[i] = 0x20;
+	while (n < 13 && name[n]) {
+		d[5 + n] = (u8)name[n];
+		n++;
+	}
+	i = 5 + n;
+	if (n < 13)
+		d[i++] = 0x0A;	/* line-feed terminator when < 13 chars */
+	while (i < 18)
+		d[i++] = 0x20;	/* space padding */
 }
 
 static void build_dummy_descriptor(u8 d[18])
@@ -307,9 +323,9 @@ static void build_base_block(const struct lvda_edid_params *p,
 				break;
 			}
 	}
-	u8 depth = p->hdr ? 0x3 : 0x2;	/* 10 bpc (HDR) / 8 bpc (SDR) */
-	u8 h_cm = clamp_u8_min1((u32)((u64)p->width * 254 / (96 * 100)));
-	u8 v_cm = clamp_u8_min1((u32)((u64)p->height * 254 / (96 * 100)));
+	u8 depth = (p->hdr || p->deep_color) ? 0x3 : 0x2;	/* 10 / 8 bpc */
+	u8 h_cm = phys_cm(p->phys_width_mm, p->width);
+	u8 v_cm = phys_cm(p->phys_height_mm, p->height);
 
 	memset(b, 0, 128);
 	memcpy(b, header, 8);
@@ -342,7 +358,7 @@ static void build_base_block(const struct lvda_edid_params *p,
 
 	build_dtd(dtd, h_cm, v_cm, b + 0x36);
 	build_range_limits(range, p->refresh_mhz, b + 0x48);
-	build_name_descriptor(b + 0x5A);
+	build_name_descriptor(p->name, b + 0x5A);
 	build_dummy_descriptor(b + 0x6C);
 
 	b[0x7E] = ext_count;	/* extension blocks following the base */
@@ -412,12 +428,12 @@ static void build_displayid_block(const struct lvda_edid_params *p,
 	u32 vblank = (t->vtotal - t->vdisplay) - 1;
 	u32 vfront = (t->vsync_start - t->vdisplay) - 1;
 	u32 vsw = (t->vsync_end - t->vsync_start) - 1;
-	u8 h_cm = clamp_u8_min1((u32)((u64)t->hdisplay * 254 / (96 * 100)));
-	u8 v_cm = clamp_u8_min1((u32)((u64)t->vdisplay * 254 / (96 * 100)));
+	u8 h_cm = phys_cm(p->phys_width_mm, t->hdisplay);
+	u8 v_cm = phys_cm(p->phys_height_mm, t->vdisplay);
 	u32 h_mm10 = (u32)h_cm * 100;		/* 0.1 mm units, matches base cm */
 	u32 v_mm10 = (u32)v_cm * 100;
 	u32 aspect = (t->hdisplay * 100 + t->vdisplay / 2) / t->vdisplay;
-	u8 depth = p->hdr ? 9 : 7;		/* bpc - 1: 10 bpc (HDR) / 8 bpc */
+	u8 depth = (p->hdr || p->deep_color) ? 9 : 7;	/* bpc-1: 10 / 8 bpc */
 	u32 sum = 0;
 	u32 i;
 
