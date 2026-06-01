@@ -1,7 +1,6 @@
 # lvda integration results
 
-Companion to `INTEGRATION-PLAN.md`. Records what has been validated end-to-end,
-the evidence, and the known follow-ups. Test rig: three QEMU/KVM VMs (CachyOS,
+Test rig: three QEMU/KVM VMs (CachyOS,
 Fedora 44, Ubuntu 26.04) on libvirt NAT `192.168.122.0/24`, all GPU-less
 (llvmpipe / virtio-gpu).
 

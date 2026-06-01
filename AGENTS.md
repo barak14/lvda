@@ -16,11 +16,7 @@ that file closes — the open fd is the liveness signal (no heartbeat, no
 watchdog).
 
 User-facing docs: `README.md` (overview + `lvda-ctl` usage) and `BUILD.md`
-(kernel requirements, install, load, permissions, uninstall). Status /
-integration notes: `INTEGRATION-PLAN.md`, `INTEGRATION-RESULTS.md`. In-source
-`lvda-SPEC.md §N` backrefs point at a spec that was dropped from the tree; the
-README, BUILD.md, and the integration docs are the current authority. The
-earlier Rust prototype lives on the `archive/rust` branch.
+(kernel requirements, install, load, permissions, uninstall).
 
 ## Layout
 
@@ -87,3 +83,5 @@ Debian/Ubuntu (`packaging/debian/makedeb.sh`), Fedora/RHEL/openSUSE
   inline. The module builds `-Wall`; the userspace tests build `-Wall -Wextra`.
 - **ABI guards.** Userspace-visible structs carry `_Static_assert(sizeof(...))`
   in `uapi/lvda.h`; the EDID size constants live in `lvda_edid.h`.
+- **Comments** Only add comments that assist in understanding the code "what",
+  not "why" or "how".
