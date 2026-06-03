@@ -1,0 +1,123 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            linux-headers-$(uname -r) \
+            pkg-config \
+            libdrm-dev \
+            sparse
+
+      - name: Check whitespace
+        run: git diff --check
+
+      - name: Build host EDID tests
+        run: make -C tests/host
+
+      - name: Run host EDID tests
+        run: tests/host/test_edid
+
+      - name: Build userspace tests
+        run: make -C tests/userspace
+
+      - name: Build lvda-ctl
+        run: make -C tools/lvda-ctl
+
+      - name: Build kernel module
+        run: make -C module
+
+      - name: Build kernel module with extra warnings
+        run: |
+          make -C module clean
+          make -C module W=1
+
+      - name: Run sparse over kernel module
+        run: |
+          make -C module clean
+          make -C module C=1
+
+  static-analysis:
+    name: Static analysis
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cppcheck \
+            sparse
+
+      - name: Run cppcheck on host and userspace C
+        run: |
+          cppcheck \
+            --std=c11 \
+            --enable=warning,style,performance,portability \
+            --error-exitcode=1 \
+            --inline-suppr \
+            --suppress=missingIncludeSystem \
+            -I module \
+            -I uapi \
+            module/lvda_edid.c \
+            tests/host \
+            tests/userspace \
+            tools/lvda-ctl
+
+  sanitizers:
+    name: Sanitizers
+    runs-on: ubuntu-latest
+
+    env:
+      SAN_CFLAGS: -std=c11 -Wall -Wextra -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer
+      ASAN_OPTIONS: detect_leaks=0
+      UBSAN_OPTIONS: print_stacktrace=1
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            pkg-config \
+            libdrm-dev
+
+      - name: Build and run host EDID tests with ASan/UBSan
+        run: |
+          make -C tests/host clean
+          make -C tests/host CFLAGS="$SAN_CFLAGS -I../../module"
+          tests/host/test_edid
+
+      - name: Build userspace tests with ASan/UBSan
+        run: |
+          make -C tests/userspace clean
+          make -C tests/userspace CFLAGS="$SAN_CFLAGS"
+
+      - name: Build lvda-ctl with ASan/UBSan
+        run: |
+          make -C tools/lvda-ctl clean
+          make -C tools/lvda-ctl CFLAGS="$SAN_CFLAGS"
