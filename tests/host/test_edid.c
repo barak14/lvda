@@ -165,7 +165,7 @@ static int dump_fixtures(const char *dir)
 /* Compare against vectors/<name>.bin if present; skip silently when absent. */
 static void check_fixture(const struct fixture *f)
 {
-	u8 e[LVDA_EDID_SIZE], ref[LVDA_EDID_SIZE];
+	u8 ref[LVDA_EDID_SIZE];
 	char path[512];
 	char label[128];
 	FILE *fp;
@@ -181,6 +181,7 @@ static void check_fixture(const struct fixture *f)
 	fclose(fp);
 	snprintf(label, sizeof(label), "fixture %s", f->name);
 	{
+		u8 e[LVDA_EDID_SIZE];
 		int len = synth(ID_A, f->w, f->h, f->mhz, f->hdr, e);
 
 		check(len > 0 && (size_t)len == n && memcmp(e, ref, n) == 0,
