@@ -13,9 +13,18 @@
 #include <errno.h>
 #endif
 #include "lvda_edid.h"
+#include "../uapi/lvda.h"
 
-/* Salts the 32-bit EDID serial. Exactly 16 bytes, no NUL. */
-static const u8 KEY[16] = {
+#define LVDA_SIPHASH_KEY_LEN	16u
+#define LVDA_SIPHASH_HALF_KEY	8u
+#define LVDA_SIPHASH_LEN_SHIFT	56u
+#define LVDA_BYTE_BITS		8u
+#define LVDA_U8_MAX		0xFFu
+#define LVDA_U32_MAX		0xFFFFFFFFULL
+#define LVDA_CHECKSUM_MOD	256u
+
+/* Salts the 32-bit EDID serial. Exactly LVDA_SIPHASH_KEY_LEN bytes, no NUL. */
+static const u8 KEY[LVDA_SIPHASH_KEY_LEN] = {
 	'l', 'v', 'd', 'a', 'c', '-', 's', 'r',
 	'l', '-', 'k', 'e', 'y', '-', 'v', '1',
 };
@@ -44,14 +53,14 @@ static u64 read_le64(const u8 *p)
 static u64 siphash24(const u8 *key, const u8 *msg, u32 len)
 {
 	u64 k0 = read_le64(key);
-	u64 k1 = read_le64(key + 8);
+	u64 k1 = read_le64(key + LVDA_SIPHASH_HALF_KEY);
 	u64 v0 = 0x736f6d6570736575ULL ^ k0;
 	u64 v1 = 0x646f72616e646f6dULL ^ k1;
 	u64 v2 = 0x6c7967656e657261ULL ^ k0;
 	u64 v3 = 0x7465646279746573ULL ^ k1;
-	u64 b = (u64)len << 56;
-	const u8 *end = msg + (len & ~(u32)7);
-	u32 left = len & 7;
+	u64 b = (u64)len << LVDA_SIPHASH_LEN_SHIFT;
+	const u8 *end = msg + (len & ~(u32)(LVDA_SIPHASH_HALF_KEY - 1));
+	u32 left = len & (LVDA_SIPHASH_HALF_KEY - 1);
 	u32 i;
 
 	for (; msg != end; msg += 8) {
@@ -64,13 +73,13 @@ static u64 siphash24(const u8 *key, const u8 *msg, u32 len)
 	}
 
 	for (i = 0; i < left; i++)
-		b |= (u64)msg[i] << (8 * i);
+		b |= (u64)msg[i] << (LVDA_BYTE_BITS * i);
 
 	v3 ^= b;
 	SIPROUND;
 	SIPROUND;
 	v0 ^= b;
-	v2 ^= 0xff;
+	v2 ^= LVDA_U8_MAX;
 	SIPROUND;
 	SIPROUND;
 	SIPROUND;
@@ -93,7 +102,22 @@ struct lvda_timing {
 	u32 pixel_clock_khz;
 };
 
-#define LVDA_EDID_MIN_PCLK_KHZ 10u
+#define LVDA_EDID_MIN_PCLK_KHZ		10u
+#define LVDA_EDID_KHZ_PER_MHZ		1000u
+#define LVDA_EDID_KHZ_PER_10MHZ		10000u
+#define LVDA_EDID_RATE_OFFSET		255u
+#define LVDA_EDID_DIM_MIN		LVDA_DIM_MIN
+#define LVDA_EDID_DIM_MAX		LVDA_DIM_MAX
+#define LVDA_EDID_REFRESH_MHZ_MIN	LVDA_REFRESH_MHZ_MIN
+#define LVDA_EDID_REFRESH_MHZ_MAX	LVDA_REFRESH_MHZ_MAX
+
+#define LVDA_CVT_CELL_GRAN		8u
+#define LVDA_CVT_RB_MIN_VBLANK_NS	460000u
+#define LVDA_CVT_NS_PER_MHZ		1000000000000ULL
+#define LVDA_CVT_RB_H_BLANK		160u
+#define LVDA_CVT_RB_H_SYNC		32u
+#define LVDA_CVT_RB_V_FRONT_PORCH	3u
+#define LVDA_CVT_RB_V_BACK_PORCH	6u
 
 /* CVT vsync width (lines) from the aspect ratio of the blanking-rounded
  * width against the active height. */
@@ -114,40 +138,42 @@ static u32 cvt_vsync(u32 hbase, u32 vdisp)
 static int cvt_rb_v1(u32 width, u32 height, u32 refresh_mhz,
 		     struct lvda_timing *t)
 {
-	u32 hbase = width - (width % 8);	/* character-cell granularity */
+	u32 hbase = width - (width % LVDA_CVT_CELL_GRAN);
 	u32 vsync = cvt_vsync(hbase, height);
-	u64 frame_period_ns = 1000000000000ULL / refresh_mhz;
+	u64 frame_period_ns = LVDA_CVT_NS_PER_MHZ / refresh_mhz;
 	u64 active_period_ns;
 	u64 hperiod_ns;
 	u64 pixel_clock_khz;
 	u32 vbilines, min_vbi;
 
-	if (frame_period_ns < 460000)
+	if (frame_period_ns < LVDA_CVT_RB_MIN_VBLANK_NS)
 		return -EINVAL;
-	active_period_ns = frame_period_ns - 460000;
+	active_period_ns = frame_period_ns - LVDA_CVT_RB_MIN_VBLANK_NS;
 
 	hperiod_ns = active_period_ns / height;
 	if (hperiod_ns == 0)
 		return -EOVERFLOW;
 
-	vbilines = (u32)(460000ULL / hperiod_ns) + 1;
-	min_vbi = 3 + vsync + 6;	/* VFPORCH + vsync + VBPORCH */
+	vbilines = (u32)(LVDA_CVT_RB_MIN_VBLANK_NS / hperiod_ns) + 1;
+	min_vbi = LVDA_CVT_RB_V_FRONT_PORCH + vsync +
+		  LVDA_CVT_RB_V_BACK_PORCH;
 	if (vbilines < min_vbi)
 		vbilines = min_vbi;
 
 	t->hdisplay = width;
 	t->vdisplay = height;
-	t->htotal = hbase + 160;	/* CVT_RB_H_BLANK */
+	t->htotal = hbase + LVDA_CVT_RB_H_BLANK;
 	t->vtotal = height + vbilines;
-	t->hsync_end = hbase + 80;	/* hbase + H_BLANK/2 */
-	t->hsync_start = t->hsync_end - 32;	/* hsync_end - H_SYNC */
-	t->vsync_start = height + 3;	/* VFPORCH */
+	t->hsync_end = hbase + LVDA_CVT_RB_H_BLANK / 2;
+	t->hsync_start = t->hsync_end - LVDA_CVT_RB_H_SYNC;
+	t->vsync_start = height + LVDA_CVT_RB_V_FRONT_PORCH;
 	t->vsync_end = t->vsync_start + vsync;
 
-	pixel_clock_khz = (u64)t->htotal * 1000000ULL / hperiod_ns;
+	pixel_clock_khz = (u64)t->htotal * LVDA_EDID_KHZ_PER_MHZ *
+			  LVDA_EDID_KHZ_PER_MHZ / hperiod_ns;
 	if (pixel_clock_khz < LVDA_EDID_MIN_PCLK_KHZ)
 		return -EINVAL;
-	if (pixel_clock_khz > 0xFFFFFFFFULL)
+	if (pixel_clock_khz > LVDA_U32_MAX)
 		return -EOVERFLOW;
 	t->pixel_clock_khz = (u32)pixel_clock_khz;
 
@@ -164,12 +190,50 @@ static const u8 CHROMA_BT2020[10] = {
 	0x78, 0xB1, 0xB5, 0x4A, 0x2B, 0xCC, 0x21, 0x0B, 0x50, 0x54,
 };
 
+#define LVDA_EDID_HEADER_LEN		8u
+#define LVDA_EDID_DESC_TEXT_START	5u
+#define LVDA_EDID_LINE_FEED		0x0Au
+#define LVDA_EDID_SPACE			0x20u
+#define LVDA_EDID_MODEL_YEAR		2026u
+#define LVDA_EDID_YEAR_BASE		1990u
+#define LVDA_EDID_GAMMA_2_2		120u
+#define LVDA_EDID_STD_TIMING_COUNT	16u
+#define LVDA_EDID_STD_TIMING_UNUSED	0x01u
+#define LVDA_EDID_EST_TIMING_640_480_60	0x20u
+#define LVDA_EDID_FALLBACK_WIDTH	1920u
+#define LVDA_EDID_FALLBACK_HEIGHT	1080u
+#define LVDA_EDID_FALLBACK_REFRESH_MHZ	60000u
+
+enum lvda_edid_base_offset {
+	LVDA_BASE_VENDOR_ID = 0x08,
+	LVDA_BASE_PRODUCT_CODE = 0x0A,
+	LVDA_BASE_SERIAL = 0x0C,
+	LVDA_BASE_WEEK = 0x10,
+	LVDA_BASE_YEAR = 0x11,
+	LVDA_BASE_VERSION = 0x12,
+	LVDA_BASE_REVISION = 0x13,
+	LVDA_BASE_VIDEO_INPUT = 0x14,
+	LVDA_BASE_HSIZE_CM = 0x15,
+	LVDA_BASE_VSIZE_CM = 0x16,
+	LVDA_BASE_GAMMA = 0x17,
+	LVDA_BASE_FEATURES = 0x18,
+	LVDA_BASE_CHROMA = 0x19,
+	LVDA_BASE_EST_TIMING = 0x23,
+	LVDA_BASE_STD_TIMING = 0x26,
+	LVDA_BASE_DTD1 = 0x36,
+	LVDA_BASE_DTD2 = 0x48,
+	LVDA_BASE_DTD3 = 0x5A,
+	LVDA_BASE_DTD4 = 0x6C,
+	LVDA_BASE_EXT_COUNT = 0x7E,
+	LVDA_BASE_CHECKSUM = 0x7F,
+};
+
 static u8 clamp_u8_min1(u32 v)
 {
 	if (v == 0)
 		return 1;
-	if (v > 0xFF)
-		return 0xFF;
+	if (v > LVDA_U8_MAX)
+		return LVDA_U8_MAX;
 	return (u8)v;
 }
 
@@ -196,21 +260,21 @@ static void build_dtd(const struct lvda_timing *t, u8 h_cm, u8 v_cm, u8 d[18])
 	u32 h_mm = (u32)h_cm * 10;
 	u32 v_mm = (u32)v_cm * 10;
 
-	d[0] = (u8)(pclk & 0xFF);
-	d[1] = (u8)((pclk >> 8) & 0xFF);
-	d[2] = (u8)(h_active & 0xFF);
-	d[3] = (u8)(h_blank & 0xFF);
+	d[0] = (u8)(pclk & LVDA_U8_MAX);
+	d[1] = (u8)((pclk >> 8) & LVDA_U8_MAX);
+	d[2] = (u8)(h_active & LVDA_U8_MAX);
+	d[3] = (u8)(h_blank & LVDA_U8_MAX);
 	d[4] = (u8)((((h_active >> 8) & 0xF) << 4) | ((h_blank >> 8) & 0xF));
-	d[5] = (u8)(v_active & 0xFF);
-	d[6] = (u8)(v_blank & 0xFF);
+	d[5] = (u8)(v_active & LVDA_U8_MAX);
+	d[6] = (u8)(v_blank & LVDA_U8_MAX);
 	d[7] = (u8)((((v_active >> 8) & 0xF) << 4) | ((v_blank >> 8) & 0xF));
-	d[8] = (u8)(hso & 0xFF);
-	d[9] = (u8)(hsp & 0xFF);
+	d[8] = (u8)(hso & LVDA_U8_MAX);
+	d[9] = (u8)(hsp & LVDA_U8_MAX);
 	d[10] = (u8)(((vso & 0xF) << 4) | (vsp & 0xF));
 	d[11] = (u8)((((hso >> 8) & 0x3) << 6) | (((hsp >> 8) & 0x3) << 4) |
 		     (((vso >> 4) & 0x3) << 2) | ((vsp >> 4) & 0x3));
-	d[12] = (u8)(h_mm & 0xFF);
-	d[13] = (u8)(v_mm & 0xFF);
+	d[12] = (u8)(h_mm & LVDA_U8_MAX);
+	d[13] = (u8)(v_mm & LVDA_U8_MAX);
 	d[14] = (u8)((((h_mm >> 8) & 0xF) << 4) | ((v_mm >> 8) & 0xF));
 	d[15] = 0;	/* h border */
 	d[16] = 0;	/* v border */
@@ -221,9 +285,12 @@ static void build_dtd(const struct lvda_timing *t, u8 h_cm, u8 v_cm, u8 d[18])
 static void build_range_limits(const struct lvda_timing *t, u32 refresh_mhz,
 			       u8 d[18])
 {
-	u32 v_hz = (refresh_mhz + 500) / 1000;
+	u32 v_hz = (refresh_mhz + LVDA_EDID_KHZ_PER_MHZ / 2) /
+		   LVDA_EDID_KHZ_PER_MHZ;
 	u32 hrate_khz = (t->pixel_clock_khz + t->htotal / 2) / t->htotal;
-	u32 max_pclk_10mhz = (t->pixel_clock_khz + 9999) / 10000;
+	u32 max_pclk_10mhz = (t->pixel_clock_khz +
+			      LVDA_EDID_KHZ_PER_10MHZ - 1) /
+			     LVDA_EDID_KHZ_PER_10MHZ;
 	u8 vmax, hmax, offsets = 0;
 	u32 i;
 
@@ -231,15 +298,17 @@ static void build_range_limits(const struct lvda_timing *t, u32 refresh_mhz,
 		v_hz = 1;
 	/* EDID 1.4 rate fields are 8-bit; the byte-4 +255 offset flags extend
 	 * the max to 510 so the descriptor still covers DisplayID-class modes. */
-	if (v_hz > 0xFF) {
+	if (v_hz > LVDA_U8_MAX) {
 		offsets |= LVDA_EDID_RANGE_OFF_MAX_VFREQ;
-		vmax = (v_hz - 255 > 0xFF) ? 0xFF : (u8)(v_hz - 255);
+		vmax = (v_hz - LVDA_EDID_RATE_OFFSET > LVDA_U8_MAX) ?
+			LVDA_U8_MAX : (u8)(v_hz - LVDA_EDID_RATE_OFFSET);
 	} else {
 		vmax = (u8)v_hz;
 	}
-	if (hrate_khz > 0xFF) {
+	if (hrate_khz > LVDA_U8_MAX) {
 		offsets |= LVDA_EDID_RANGE_OFF_MAX_HFREQ;
-		hmax = (hrate_khz - 255 > 0xFF) ? 0xFF : (u8)(hrate_khz - 255);
+		hmax = (hrate_khz - LVDA_EDID_RATE_OFFSET > LVDA_U8_MAX) ?
+			LVDA_U8_MAX : (u8)(hrate_khz - LVDA_EDID_RATE_OFFSET);
 	} else {
 		hmax = (u8)hrate_khz;
 	}
@@ -251,11 +320,12 @@ static void build_range_limits(const struct lvda_timing *t, u32 refresh_mhz,
 	d[6] = vmax;		/* max vertical rate (Hz; +255 when flagged) */
 	d[7] = 1;		/* min horizontal rate (kHz) */
 	d[8] = hmax;		/* max horizontal rate (kHz; +255 when flagged) */
-	d[9] = (max_pclk_10mhz > 0xFF) ? 0xFF : (u8)max_pclk_10mhz;
+	d[9] = (max_pclk_10mhz > LVDA_U8_MAX) ?
+	       LVDA_U8_MAX : (u8)max_pclk_10mhz;
 	d[10] = LVDA_EDID_RANGE_LIMITS_ONLY;
-	d[11] = 0x0A;		/* line feed */
+	d[11] = LVDA_EDID_LINE_FEED;
 	for (i = 12; i < LVDA_EDID_DESC_LEN; i++)
-		d[i] = 0x20;
+		d[i] = LVDA_EDID_SPACE;
 }
 
 static void build_name_descriptor(const char *name, u8 d[18])
@@ -269,14 +339,14 @@ static void build_name_descriptor(const char *name, u8 d[18])
 	memset(d, 0, LVDA_EDID_DESC_LEN);
 	d[3] = LVDA_EDID_DESC_NAME;
 	while (n < LVDA_EDID_NAME_CHARS && name[n]) {
-		d[5 + n] = (u8)name[n];
+		d[LVDA_EDID_DESC_TEXT_START + n] = (u8)name[n];
 		n++;
 	}
-	i = 5 + n;
+	i = LVDA_EDID_DESC_TEXT_START + n;
 	if (n < LVDA_EDID_NAME_CHARS)
-		d[i++] = 0x0A;	/* line-feed terminator when < 13 chars */
+		d[i++] = LVDA_EDID_LINE_FEED;
 	while (i < LVDA_EDID_DESC_LEN)
-		d[i++] = 0x20;	/* space padding */
+		d[i++] = LVDA_EDID_SPACE;
 }
 
 static void build_dummy_descriptor(u8 d[18])
@@ -292,7 +362,7 @@ static u8 edid_checksum(const u8 *block)
 
 	for (i = 0; i < LVDA_EDID_BLOCK - 1; i++)
 		sum += block[i];
-	return (u8)((256 - (sum & 0xFF)) & 0xFF);
+	return (u8)((LVDA_CHECKSUM_MOD - (sum & LVDA_U8_MAX)) & LVDA_U8_MAX);
 }
 
 static void build_base_block(const struct lvda_edid_params *p,
@@ -300,7 +370,7 @@ static void build_base_block(const struct lvda_edid_params *p,
 			     const struct lvda_timing *range,
 			     int preferred, u8 ext_count, u8 *b)
 {
-	static const u8 header[8] = {
+	static const u8 header[LVDA_EDID_HEADER_LEN] = {
 		0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00,
 	};
 	/* PNP "LVD": each letter (c-'@')&0x1F, packed (a<<10)|(b<<5)|c. */
@@ -310,10 +380,11 @@ static void build_base_block(const struct lvda_edid_params *p,
 	/* EDID serial: siphash24(KEY, client_id), or 0 for an all-zero client_id. */
 	u32 serial = 0;
 	{
-		int i;
-		for (i = 0; i < 16; i++)
+		u32 i;
+		for (i = 0; i < sizeof(KEY); i++)
 			if (p->client_id[i]) {
-				serial = (u32)siphash24(KEY, p->client_id, 16);
+				serial = (u32)siphash24(KEY, p->client_id,
+							 sizeof(KEY));
 				break;
 			}
 	}
@@ -323,43 +394,46 @@ static void build_base_block(const struct lvda_edid_params *p,
 	u8 v_cm = phys_cm(p->phys_height_mm, p->height);
 
 	memset(b, 0, LVDA_EDID_BLOCK);
-	memcpy(b, header, 8);
+	memcpy(b, header, LVDA_EDID_HEADER_LEN);
 
-	b[0x08] = (u8)((pnp >> 8) & 0xFF);	/* big-endian PNP */
-	b[0x09] = (u8)(pnp & 0xFF);
-	b[0x0A] = 0x01;		/* product code u16 LE = 0x0001 */
-	b[0x0B] = 0x00;
-	b[0x0C] = (u8)(serial & 0xFF);		/* serial LE */
-	b[0x0D] = (u8)((serial >> 8) & 0xFF);
-	b[0x0E] = (u8)((serial >> 16) & 0xFF);
-	b[0x0F] = (u8)((serial >> 24) & 0xFF);
-	b[0x10] = 0xFF;		/* week: model-year flag */
-	b[0x11] = 36;		/* year = 2026 - 1990 */
-	b[0x12] = 0x01;		/* EDID version */
-	b[0x13] = 0x04;		/* EDID revision */
-	b[0x14] = (u8)(LVDA_EDID_INPUT_DIGITAL | depth_bits | LVDA_EDID_TYPE_DP);
-	b[0x15] = h_cm;
-	b[0x16] = v_cm;
-	b[0x17] = 120;		/* gamma 2.2 */
+	b[LVDA_BASE_VENDOR_ID] = (u8)((pnp >> 8) & LVDA_U8_MAX);
+	b[LVDA_BASE_VENDOR_ID + 1] = (u8)(pnp & LVDA_U8_MAX);
+	b[LVDA_BASE_PRODUCT_CODE] = 0x01;
+	b[LVDA_BASE_PRODUCT_CODE + 1] = 0x00;
+	b[LVDA_BASE_SERIAL] = (u8)(serial & LVDA_U8_MAX);
+	b[LVDA_BASE_SERIAL + 1] = (u8)((serial >> 8) & LVDA_U8_MAX);
+	b[LVDA_BASE_SERIAL + 2] = (u8)((serial >> 16) & LVDA_U8_MAX);
+	b[LVDA_BASE_SERIAL + 3] = (u8)((serial >> 24) & LVDA_U8_MAX);
+	b[LVDA_BASE_WEEK] = LVDA_U8_MAX;
+	b[LVDA_BASE_YEAR] = LVDA_EDID_MODEL_YEAR - LVDA_EDID_YEAR_BASE;
+	b[LVDA_BASE_VERSION] = 0x01;
+	b[LVDA_BASE_REVISION] = 0x04;
+	b[LVDA_BASE_VIDEO_INPUT] =
+		(u8)(LVDA_EDID_INPUT_DIGITAL | depth_bits | LVDA_EDID_TYPE_DP);
+	b[LVDA_BASE_HSIZE_CM] = h_cm;
+	b[LVDA_BASE_VSIZE_CM] = v_cm;
+	b[LVDA_BASE_GAMMA] = LVDA_EDID_GAMMA_2_2;
 	/* Standby (cosmetic) + sRGB default (SDR only) + preferred native
 	 * timing (when the base DTD carries the real mode) + continuous freq. */
-	b[0x18] = (u8)(LVDA_EDID_FEATURE_STANDBY |
-		       (p->hdr ? 0 : LVDA_EDID_FEATURE_STD_COLOR) |
-		       (preferred ? LVDA_EDID_FEATURE_PREFERRED : 0) |
-		       LVDA_EDID_FEATURE_CONT_FREQ);
-	memcpy(b + 0x19, p->hdr ? CHROMA_BT2020 : CHROMA_BT709, 10);
-	b[0x23] = 0x20;		/* established timings I: 640x480@60 */
-	b[0x24] = 0x00;
-	b[0x25] = 0x00;
-	memset(b + 0x26, 0x01, 16);	/* standard timings: unused markers */
+	b[LVDA_BASE_FEATURES] = (u8)(LVDA_EDID_FEATURE_STANDBY |
+				     (p->hdr ? 0 : LVDA_EDID_FEATURE_STD_COLOR) |
+				     (preferred ? LVDA_EDID_FEATURE_PREFERRED : 0) |
+				     LVDA_EDID_FEATURE_CONT_FREQ);
+	memcpy(b + LVDA_BASE_CHROMA, p->hdr ? CHROMA_BT2020 : CHROMA_BT709,
+	       sizeof(CHROMA_BT709));
+	b[LVDA_BASE_EST_TIMING] = LVDA_EDID_EST_TIMING_640_480_60;
+	b[LVDA_BASE_EST_TIMING + 1] = 0x00;
+	b[LVDA_BASE_EST_TIMING + 2] = 0x00;
+	memset(b + LVDA_BASE_STD_TIMING, LVDA_EDID_STD_TIMING_UNUSED,
+	       LVDA_EDID_STD_TIMING_COUNT);
 
-	build_dtd(dtd, h_cm, v_cm, b + 0x36);
-	build_range_limits(range, p->refresh_mhz, b + 0x48);
-	build_name_descriptor(p->name, b + 0x5A);
-	build_dummy_descriptor(b + 0x6C);
+	build_dtd(dtd, h_cm, v_cm, b + LVDA_BASE_DTD1);
+	build_range_limits(range, p->refresh_mhz, b + LVDA_BASE_DTD2);
+	build_name_descriptor(p->name, b + LVDA_BASE_DTD3);
+	build_dummy_descriptor(b + LVDA_BASE_DTD4);
 
-	b[0x7E] = ext_count;	/* extension blocks following the base */
-	b[0x7F] = edid_checksum(b);
+	b[LVDA_BASE_EXT_COUNT] = ext_count;
+	b[LVDA_BASE_CHECKSUM] = edid_checksum(b);
 }
 
 /* ---- CTA-861 extension ---- */
@@ -505,11 +579,12 @@ int lvda_synth_edid(const struct lvda_edid_params *p,
 
 	if (!p || !p->client_id || !out)
 		return -EINVAL;
-	if (p->width < 1 || p->width > 16384)
+	if (p->width < LVDA_EDID_DIM_MIN || p->width > LVDA_EDID_DIM_MAX)
 		return -EINVAL;
-	if (p->height < 1 || p->height > 16384)
+	if (p->height < LVDA_EDID_DIM_MIN || p->height > LVDA_EDID_DIM_MAX)
 		return -EINVAL;
-	if (p->refresh_mhz < 1000 || p->refresh_mhz > 1000000)
+	if (p->refresh_mhz < LVDA_EDID_REFRESH_MHZ_MIN ||
+	    p->refresh_mhz > LVDA_EDID_REFRESH_MHZ_MAX)
 		return -EINVAL;
 
 	ret = cvt_rb_v1(p->width, p->height, p->refresh_mhz, &t);
@@ -527,7 +602,8 @@ int lvda_synth_edid(const struct lvda_edid_params *p,
 	if (t.pixel_clock_khz > LVDA_DID_MAX_PCLK_KHZ)
 		return -EOVERFLOW;
 
-	ret = cvt_rb_v1(1920, 1080, 60000, &fallback);
+	ret = cvt_rb_v1(LVDA_EDID_FALLBACK_WIDTH, LVDA_EDID_FALLBACK_HEIGHT,
+			LVDA_EDID_FALLBACK_REFRESH_MHZ, &fallback);
 	if (ret)
 		return ret;
 

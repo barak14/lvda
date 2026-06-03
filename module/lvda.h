@@ -41,7 +41,8 @@ void lvda_card_unregister(void);
  * EDID, mark its connector connected, fire a hotplug event. owner is an opaque
  * token (the /dev/lvda file) recorded so the monitor is reaped when that file
  * closes. On success *monitor_id (the LVDA_IOC_REMOVE handle), *card_minor,
- * and name[32] (the DRM connector name) are filled. Returns 0 or -errno:
+ * and name[LVDA_CONNECTOR_NAME_LEN] (the DRM connector name) are filled.
+ * Returns 0 or -errno:
  *   -EINVAL    dimensions/refresh out of range
  *   -EOVERFLOW mode exceeds the DisplayID pixel-clock ceiling
  *   -ENOSPC    no free monitor slot
@@ -49,7 +50,7 @@ void lvda_card_unregister(void);
  */
 int lvda_monitor_add(void *owner, const struct lvda_add *req,
 		      __u32 *monitor_id, __u64 *generation,
-		      __u32 *card_minor, char name[32]);
+		      __u32 *card_minor, char name[LVDA_CONNECTOR_NAME_LEN]);
 
 /* Disable a monitor previously added by the same owner. Returns -EINVAL if
  * monitor_id is out of range or not owned by owner. */

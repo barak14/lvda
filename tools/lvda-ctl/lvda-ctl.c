@@ -136,7 +136,10 @@ static int write_atomic(const char *path, const char *content)
  * A 0xff domain separator between parts keeps ("a","bc") distinct from
  * ("ab","c").
  */
-static void fnv1a_128(const char *const parts[], size_t nparts, uint8_t out[16])
+#define CLIENT_ID_HEX_LEN (LVDA_CLIENT_ID_LEN * 2u)
+
+static void fnv1a_128(const char *const parts[], size_t nparts,
+		      uint8_t out[LVDA_CLIENT_ID_LEN])
 {
 	const __uint128_t prime =
 		((__uint128_t)0x0000000001000000ULL << 64) | 0x000000000000013bULL;
@@ -151,7 +154,7 @@ static void fnv1a_128(const char *const parts[], size_t nparts, uint8_t out[16])
 		h ^= (__uint128_t)0xff;
 		h *= prime;
 	}
-	for (int i = 0; i < 16; i++) {
+	for (size_t i = 0; i < LVDA_CLIENT_ID_LEN; i++) {
 		out[i] = (uint8_t)(h & 0xff);
 		h >>= 8;
 	}
@@ -170,12 +173,12 @@ static int hex_nibble(char c, uint8_t *out)
 	return 0;
 }
 
-/* Parse exactly 32 hex chars into 16 bytes. Returns 0 or -1. */
-static int parse_client_id(const char *s, uint8_t out[16])
+/* Parse exactly CLIENT_ID_HEX_LEN hex chars into LVDA_CLIENT_ID_LEN bytes. */
+static int parse_client_id(const char *s, uint8_t out[LVDA_CLIENT_ID_LEN])
 {
-	if (strlen(s) != 32)
+	if (strlen(s) != CLIENT_ID_HEX_LEN)
 		return -1;
-	for (int i = 0; i < 16; i++) {
+	for (size_t i = 0; i < LVDA_CLIENT_ID_LEN; i++) {
 		uint8_t hi, lo;
 
 		if (hex_nibble(s[2 * i], &hi) < 0 || hex_nibble(s[2 * i + 1], &lo) < 0)
@@ -185,7 +188,7 @@ static int parse_client_id(const char *s, uint8_t out[16])
 	return 0;
 }
 
-static void derive_client_id(uint8_t out[16])
+static void derive_client_id(uint8_t out[LVDA_CLIENT_ID_LEN])
 {
 	const char *app_id = getenv("SUNSHINE_APP_ID");
 	const char *app_name = getenv("SUNSHINE_APP_NAME");
@@ -198,11 +201,12 @@ static void derive_client_id(uint8_t out[16])
 	fnv1a_128(parts, 3, out);
 }
 
-static void format_client_id(const uint8_t id[16], char out[33])
+static void format_client_id(const uint8_t id[LVDA_CLIENT_ID_LEN],
+			     char out[CLIENT_ID_HEX_LEN + 1])
 {
-	for (int i = 0; i < 16; i++)
+	for (size_t i = 0; i < LVDA_CLIENT_ID_LEN; i++)
 		sprintf(out + 2 * i, "%02x", id[i]);
-	out[32] = '\0';
+	out[CLIENT_ID_HEX_LEN] = '\0';
 }
 
 /* Resolve a u32 setting: CLI value (>= 0) wins, else env, else fallback. */
@@ -231,11 +235,12 @@ static int env_bool(const char *env)
 }
 
 /* Copy a possibly-unterminated kernel buffer into a NUL-terminated string. */
-static void connector_str(const __u8 in[32], char out[33])
+static void connector_str(const __u8 in[LVDA_CONNECTOR_NAME_LEN],
+			  char out[LVDA_CONNECTOR_NAME_LEN + 1])
 {
-	int i;
+	size_t i;
 
-	for (i = 0; i < 32 && in[i]; i++)
+	for (i = 0; i < LVDA_CONNECTOR_NAME_LEN && in[i]; i++)
 		out[i] = (char)in[i];
 	out[i] = '\0';
 }
@@ -311,9 +316,9 @@ static int cmd_up(int argc, char **argv)
 	const char *cli_name = NULL;
 	const char *pidfile = NULL;
 	const char *card_out = DEFAULT_CARD_OUT;
-	uint8_t client_id[16];
-	char cid_str[33];
-	char connector[33];
+	uint8_t client_id[LVDA_CLIENT_ID_LEN];
+	char cid_str[CLIENT_ID_HEX_LEN + 1];
+	char connector[LVDA_CONNECTOR_NAME_LEN + 1];
 	char buf[64];
 	struct lvda_add req;
 	uint32_t flags = 0;

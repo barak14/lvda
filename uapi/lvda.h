@@ -47,7 +47,10 @@
 #define LVDA_PHYS_MM_MAX      2550u
 
 /* Usable bytes of lvda_add.name (EDID monitor-name descriptor capacity). */
-#define LVDA_NAME_MAX         13u
+#define LVDA_CLIENT_ID_LEN      16u
+#define LVDA_NAME_FIELD_LEN     16u
+#define LVDA_NAME_MAX           13u
+#define LVDA_CONNECTOR_NAME_LEN 32u
 
 /*
  * Enable a virtual monitor on the persistent lvda card at an exact mode.
@@ -60,19 +63,19 @@
  */
 struct lvda_add {
 	/* IN */
-	__u8  client_id[16];
+	__u8  client_id[LVDA_CLIENT_ID_LEN];
 	__u32 width;            /* 1..8192 */
 	__u32 height;           /* 1..8192 */
 	__u32 refresh_mhz;      /* 1000..1000000 (milli-Hz) */
 	__u32 flags;            /* LVDA_F_* */
 	__u32 phys_width_mm;    /* EDID physical width; 0 = derive at 96 DPI */
 	__u32 phys_height_mm;   /* EDID physical height; 0 = derive at 96 DPI */
-	__u8  name[16];         /* monitor name, <=LVDA_NAME_MAX chars; "" = "lvda" */
+	__u8  name[LVDA_NAME_FIELD_LEN]; /* <=LVDA_NAME_MAX chars; "" = "lvda" */
 	__u32 reserved[2];      /* MBZ */
 	/* OUT */
 	__u32 monitor_id;       /* handle for LVDA_IOC_REMOVE */
 	__u32 drm_card_minor;   /* N in /dev/dri/cardN (persistent) */
-	__u8  connector_name[32];
+	__u8  connector_name[LVDA_CONNECTOR_NAME_LEN];
 };
 
 struct lvda_remove {

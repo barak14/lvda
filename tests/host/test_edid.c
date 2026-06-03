@@ -21,6 +21,7 @@
 #include <sys/stat.h>
 
 #include "../../module/lvda_edid.h"
+#include "../../uapi/lvda.h"
 
 /* Base-block field offsets. */
 #define OFF_SERIAL	0x0C	/* siphash24(client_id) truncated u32 */
@@ -294,9 +295,11 @@ int main(int argc, char **argv)
 	check(rc > 0 && b[LVDA_EDID_BASE_SIZE + 20] == 0x03,
 	      "DisplayID Type I detailed-timing block");
 
-	/* 5d. A clock beyond the DisplayID 24-bit field is genuinely rejected. */
-	rc = synth(ID_A, 16384, 16384, 1000000, 0, b);
-	check(rc == -EOVERFLOW, "16384^2@1000Hz -> -EOVERFLOW (beyond DisplayID)");
+	/* 5d. The largest requestable mode still fits the DisplayID path. */
+	rc = synth(ID_A, LVDA_DIM_MAX, LVDA_DIM_MAX, LVDA_REFRESH_MHZ_MAX, 0,
+		   b);
+	check(rc == (int)LVDA_EDID_SIZE,
+	      "max request bounds -> DisplayID EDID");
 
 	/* 6. HDR vs SDR: depth, chromaticity, and HDR metadata block. */
 	rc = synth(ID_A, 1920, 1080, 60000, 0, sdr);

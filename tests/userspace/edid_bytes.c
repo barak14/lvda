@@ -21,6 +21,13 @@
 #include "../../uapi/lvda.h"
 
 #define EDID_LEN 256
+#define NS_PER_MS 1000000L
+#define EDID_READ_TRIES 10
+#define EDID_READ_RETRY_MS 50L
+#define EDID_READ_RETRY_NS (EDID_READ_RETRY_MS * NS_PER_MS)
+#define TEST_WIDTH 1920u
+#define TEST_HEIGHT 1080u
+#define TEST_REFRESH_MHZ 60000u
 
 /*
  * Read the connector EDID from sysfs into buf[EDID_LEN]. The edid property
@@ -31,13 +38,15 @@ static int read_sysfs_edid(unsigned minor, const char *connector,
 			   unsigned char *buf)
 {
 	char path[128];
-	const struct timespec ts = { .tv_sec = 0,
-				     .tv_nsec = 50L * 1000 * 1000 };
+	const struct timespec ts = {
+		.tv_sec = 0,
+		.tv_nsec = EDID_READ_RETRY_NS,
+	};
 
 	snprintf(path, sizeof(path), "/sys/class/drm/card%u-%s/edid",
 		 minor, connector);
 
-	for (int attempt = 0; attempt < 10; attempt++) {
+	for (int attempt = 0; attempt < EDID_READ_TRIES; attempt++) {
 		int fd = open(path, O_RDONLY);
 		if (fd >= 0) {
 			ssize_t total = 0;
@@ -91,7 +100,8 @@ static void force_detect(unsigned minor, const char *conn)
 /* ADD a monitor on a fresh /dev/lvda fd. Returns the fd (>=0), or:
  *   -1  -> /dev/lvda absent (skip)
  *   -2  -> ADD failed (test failure)
- * On success fills *minor and conn[33] (NUL-terminated). */
+ * On success fills *minor and conn[LVDA_CONNECTOR_NAME_LEN + 1]
+ * (NUL-terminated). */
 static int create_display(unsigned flags, unsigned *minor, char *conn)
 {
 	int fd = open("/dev/lvda", O_RDWR);
@@ -104,9 +114,9 @@ static int create_display(unsigned flags, unsigned *minor, char *conn)
 
 	struct lvda_add req;
 	memset(&req, 0, sizeof(req));
-	req.width = 1920;
-	req.height = 1080;
-	req.refresh_mhz = 60000;
+	req.width = TEST_WIDTH;
+	req.height = TEST_HEIGHT;
+	req.refresh_mhz = TEST_REFRESH_MHZ;
 	req.flags = flags;
 
 	if (ioctl(fd, LVDA_IOC_ADD, &req) < 0) {
@@ -116,8 +126,8 @@ static int create_display(unsigned flags, unsigned *minor, char *conn)
 	}
 
 	*minor = req.drm_card_minor;
-	memcpy(conn, req.connector_name, 32);
-	conn[32] = '\0';
+	memcpy(conn, req.connector_name, LVDA_CONNECTOR_NAME_LEN);
+	conn[LVDA_CONNECTOR_NAME_LEN] = '\0';
 	force_detect(*minor, conn);
 	return fd;
 }
@@ -144,12 +154,14 @@ static int check_edid(const unsigned char *e, unsigned char expect_video_in,
 	/* Preferred-mode DTD at base offset 0x36. */
 	unsigned hactive = e[0x38] | ((unsigned)(e[0x3A] >> 4) << 8);
 	unsigned vactive = e[0x3B] | ((unsigned)(e[0x3D] >> 4) << 8);
-	if (hactive != 1920) {
-		fprintf(stderr, "%s: DTD hactive=%u, want 1920\n", tag, hactive);
+	if (hactive != TEST_WIDTH) {
+		fprintf(stderr, "%s: DTD hactive=%u, want %u\n", tag,
+			hactive, TEST_WIDTH);
 		ok = 0;
 	}
-	if (vactive != 1080) {
-		fprintf(stderr, "%s: DTD vactive=%u, want 1080\n", tag, vactive);
+	if (vactive != TEST_HEIGHT) {
+		fprintf(stderr, "%s: DTD vactive=%u, want %u\n", tag,
+			vactive, TEST_HEIGHT);
 		ok = 0;
 	}
 
@@ -197,7 +209,7 @@ int main(void)
 {
 	unsigned char edid[EDID_LEN];
 	unsigned minor;
-	char conn[33];
+	char conn[LVDA_CONNECTOR_NAME_LEN + 1];
 	int rc = 0;
 
 	/* Case 1: SDR, 8 bpc -> 0x80 | (0x02 << 4) | 0x05 == 0xA5. */

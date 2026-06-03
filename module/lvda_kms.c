@@ -282,11 +282,11 @@ static const struct drm_driver lvda_drm_driver = {
 
 /* Reject a monitor name with non-printable bytes or one longer than the EDID
  * monitor-name descriptor holds. Empty is valid. */
-static int lvda_validate_name(const __u8 name[16])
+static int lvda_validate_name(const __u8 name[LVDA_NAME_FIELD_LEN])
 {
 	unsigned int n;
 
-	for (n = 0; n < 16; n++) {
+	for (n = 0; n < LVDA_NAME_FIELD_LEN; n++) {
 		if (!name[n])
 			break;
 		if (name[n] < 0x20 || name[n] > 0x7E)
@@ -493,7 +493,7 @@ void lvda_card_unregister(void)
 
 int lvda_monitor_add(void *owner, const struct lvda_add *req,
 		      __u32 *monitor_id, __u64 *generation,
-		      __u32 *card_minor, char name[32])
+		      __u32 *card_minor, char name[LVDA_CONNECTOR_NAME_LEN])
 {
 	struct lvda_device *ldev = lvda_card;
 	struct lvda_monitor *mon = NULL;

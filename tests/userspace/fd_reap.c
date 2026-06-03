@@ -22,10 +22,58 @@
 
 #include "../../uapi/lvda.h"
 
+#define NS_PER_MS 1000000L
+#define CONNECTOR_STATUS_TRIES 40
+#define CONNECTOR_STATUS_POLL_MS 50L
+#define CONNECTOR_STATUS_POLL_NS (CONNECTOR_STATUS_POLL_MS * NS_PER_MS)
+#define TEST_WIDTH 1920u
+#define TEST_HEIGHT 1080u
+#define TEST_REFRESH_MHZ 60000u
+
 struct reap_msg {
 	uint32_t minor;
-	char connector[32];
+	char connector[LVDA_CONNECTOR_NAME_LEN];
 };
+
+static int write_full(int fd, const void *buf, size_t len)
+{
+	const char *p = buf;
+
+	while (len) {
+		ssize_t n = write(fd, p, len);
+
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			return -1;
+		}
+		if (n == 0)
+			return -1;
+		p += n;
+		len -= (size_t)n;
+	}
+	return 0;
+}
+
+static int read_full(int fd, void *buf, size_t len)
+{
+	char *p = buf;
+
+	while (len) {
+		ssize_t n = read(fd, p, len);
+
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			return -1;
+		}
+		if (n == 0)
+			return -1;
+		p += n;
+		len -= (size_t)n;
+	}
+	return 0;
+}
 
 static int card_exists(unsigned minor)
 {
@@ -61,11 +109,14 @@ static int read_status(unsigned minor, const char *conn, char *buf, size_t n)
 
 static int wait_status(unsigned minor, const char *conn, const char *want)
 {
-	const struct timespec ts = { .tv_sec = 0, .tv_nsec = 50L * 1000 * 1000 };
+	const struct timespec ts = {
+		.tv_sec = 0,
+		.tv_nsec = CONNECTOR_STATUS_POLL_NS,
+	};
 	char buf[32];
 	int i;
 
-	for (i = 0; i < 40; i++) {
+	for (i = 0; i < CONNECTOR_STATUS_TRIES; i++) {
 		if (read_status(minor, conn, buf, sizeof(buf)) == 0 &&
 		    strcmp(buf, want) == 0)
 			return 0;
@@ -85,16 +136,16 @@ static void child(int wfd)
 		_exit(2);
 
 	memset(&req, 0, sizeof(req));
-	req.width = 1920;
-	req.height = 1080;
-	req.refresh_mhz = 60000;
+	req.width = TEST_WIDTH;
+	req.height = TEST_HEIGHT;
+	req.refresh_mhz = TEST_REFRESH_MHZ;
 
 	if (ioctl(fd, LVDA_IOC_ADD, &req) < 0)
 		_exit(3);
 
 	msg.minor = req.drm_card_minor;
 	memcpy(msg.connector, req.connector_name, sizeof(msg.connector));
-	if (write(wfd, &msg, sizeof(msg)) != (ssize_t)sizeof(msg))
+	if (write_full(wfd, &msg, sizeof(msg)) != 0)
 		_exit(4);
 
 	/* Deliberately leak fd: rely on the kernel to reap on _exit. */
@@ -107,8 +158,8 @@ int main(void)
 	int pipefd[2];
 	pid_t pid;
 	struct reap_msg msg;
-	char conn[33];
-	ssize_t got;
+	char conn[LVDA_CONNECTOR_NAME_LEN + 1];
+	int got_msg;
 	int status;
 
 	if (probe < 0) {
@@ -137,22 +188,22 @@ int main(void)
 	}
 
 	close(pipefd[1]);
-	got = read(pipefd[0], &msg, sizeof(msg));
+	got_msg = read_full(pipefd[0], &msg, sizeof(msg));
 	close(pipefd[0]);
 
 	if (waitpid(pid, &status, 0) < 0) {
 		fprintf(stderr, "waitpid: %s\n", strerror(errno));
 		return EXIT_FAILURE;
 	}
-	if (got != (ssize_t)sizeof(msg) || !WIFEXITED(status) ||
+	if (got_msg != 0 || !WIFEXITED(status) ||
 	    WEXITSTATUS(status) != 0) {
-		fprintf(stderr, "child failed (got=%zd status=%d)\n", got,
+		fprintf(stderr, "child failed (got_msg=%d status=%d)\n", got_msg,
 			status);
 		return EXIT_FAILURE;
 	}
 
-	memcpy(conn, msg.connector, 32);
-	conn[32] = '\0';
+	memcpy(conn, msg.connector, LVDA_CONNECTOR_NAME_LEN);
+	conn[LVDA_CONNECTOR_NAME_LEN] = '\0';
 	printf("fd_reap: child added %s on card%u then exited\n", conn,
 	       (unsigned)msg.minor);
 

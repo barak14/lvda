@@ -101,6 +101,7 @@ int main(void)
 			continue;
 
 		uint64_t in_formats_blob = 0;
+		uint64_t plane_type = UINT64_MAX;
 		int have_blob = 0;
 		for (uint32_t i = 0; i < props->count_props; i++) {
 			drmModePropertyPtr p =
@@ -111,11 +112,16 @@ int main(void)
 				in_formats_blob = props->prop_values[i];
 				have_blob = 1;
 			}
+			if (strcmp(p->name, "type") == 0)
+				plane_type = props->prop_values[i];
 			drmModeFreeProperty(p);
-			if (have_blob)
+			if (have_blob && plane_type != UINT64_MAX)
 				break;
 		}
 		drmModeFreeObjectProperties(props);
+
+		if (plane_type != DRM_PLANE_TYPE_PRIMARY)
+			continue;
 
 		if (!have_blob)
 			continue;

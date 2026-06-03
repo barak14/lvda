@@ -21,6 +21,14 @@
 
 #include "../../uapi/lvda.h"
 
+#define NS_PER_MS 1000000L
+#define CONNECTOR_STATUS_TRIES 40
+#define CONNECTOR_STATUS_POLL_MS 50L
+#define CONNECTOR_STATUS_POLL_NS (CONNECTOR_STATUS_POLL_MS * NS_PER_MS)
+#define TEST_WIDTH 1920u
+#define TEST_HEIGHT 1080u
+#define TEST_REFRESH_MHZ 60000u
+
 static int card_exists(unsigned minor)
 {
 	char path[64];
@@ -58,11 +66,14 @@ static int read_status(unsigned minor, const char *conn, char *buf, size_t n)
 /* Poll the connector status until it equals want (~2s). Returns 0 on match. */
 static int wait_status(unsigned minor, const char *conn, const char *want)
 {
-	const struct timespec ts = { .tv_sec = 0, .tv_nsec = 50L * 1000 * 1000 };
+	const struct timespec ts = {
+		.tv_sec = 0,
+		.tv_nsec = CONNECTOR_STATUS_POLL_NS,
+	};
 	char buf[32];
 	int i;
 
-	for (i = 0; i < 40; i++) {
+	for (i = 0; i < CONNECTOR_STATUS_TRIES; i++) {
 		if (read_status(minor, conn, buf, sizeof(buf)) == 0 &&
 		    strcmp(buf, want) == 0)
 			return 0;
@@ -76,7 +87,7 @@ int main(void)
 	int fd = open("/dev/lvda", O_RDWR);
 	struct lvda_add req;
 	struct lvda_remove rm;
-	char conn[33];
+	char conn[LVDA_CONNECTOR_NAME_LEN + 1];
 
 	if (fd < 0) {
 		if (errno == ENOENT || errno == EACCES) {
@@ -88,9 +99,9 @@ int main(void)
 	}
 
 	memset(&req, 0, sizeof(req));
-	req.width = 1920;
-	req.height = 1080;
-	req.refresh_mhz = 60000;
+	req.width = TEST_WIDTH;
+	req.height = TEST_HEIGHT;
+	req.refresh_mhz = TEST_REFRESH_MHZ;
 	req.flags = 0;
 
 	if (ioctl(fd, LVDA_IOC_ADD, &req) < 0) {
@@ -111,8 +122,8 @@ int main(void)
 		return EXIT_FAILURE;
 	}
 
-	memcpy(conn, req.connector_name, 32);
-	conn[32] = '\0';
+	memcpy(conn, req.connector_name, LVDA_CONNECTOR_NAME_LEN);
+	conn[LVDA_CONNECTOR_NAME_LEN] = '\0';
 	printf("add_remove: minor=%u connector=%s monitor_id=%u\n",
 	       (unsigned)req.drm_card_minor, conn, (unsigned)req.monitor_id);
 
