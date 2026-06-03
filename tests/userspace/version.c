@@ -42,7 +42,7 @@ int main(void)
 
 	if (ver.major != LVDA_PROTOCOL_MAJOR) {
 		fprintf(stderr, "major=%u, want %u\n", ver.major,
-			LVDA_PROTOCOL_MAJOR);
+			(unsigned int)LVDA_PROTOCOL_MAJOR);
 		close(fd);
 		return EXIT_FAILURE;
 	}

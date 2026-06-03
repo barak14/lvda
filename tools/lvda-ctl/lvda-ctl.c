@@ -511,7 +511,7 @@ static int cmd_down(int argc, char **argv)
 static void list_daemons(void)
 {
 	DIR *dir = opendir(RENDEZVOUS_DIR);
-	struct dirent *ent;
+	const struct dirent *ent;
 	int found = 0;
 
 	if (!dir) {
