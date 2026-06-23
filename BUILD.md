@@ -21,6 +21,20 @@ produces a DKMS package, and installs the same drop-ins: the `lvda` group
 (`/usr/lib/udev/rules.d`), boot autoload (`/usr/lib/modules-load.d`), plus
 `/usr/bin/lvda-ctl` and the `/usr/include/lvda/lvda.h` UAPI header.
 
+### One command — any distro
+
+From the repo root, build the native package for whatever distro you are on:
+
+```sh
+./build.sh                 # auto-detect (arch/deb/rpm/nix/gentoo) and build
+./build.sh -n              # dry run: print what would run, build nothing
+./build.sh deb             # force a specific format
+LVDA_PKG=rpm ./build.sh    # override detection via environment
+```
+
+Detection reads `/etc/os-release`, then falls back to whichever packaging tool
+is installed. It dispatches to the matching per-distro recipe below.
+
 ### Arch / CachyOS — `.pkg.tar.zst`
 
 ```sh
@@ -124,6 +138,49 @@ sudo systemd-sysusers && sudo systemd-tmpfiles --create && sudo udevadm control 
 ```
 
 This skips DKMS — rebuild the module manually after each kernel update.
+
+---
+
+## Optional module signing
+
+Signing `lvda.ko` can satisfy Secure Boot and avoids the kernel's
+`module verification failed: signature and/or required key missing` message
+when the signing certificate is trusted by the running kernel. It does **not**
+hide that `lvda` is an out-of-tree module; the kernel may still report the
+normal out-of-tree taint.
+
+Generate and enroll a local Machine Owner Key once:
+
+```sh
+openssl req -new -x509 -newkey rsa:2048 \
+  -keyout MOK.priv \
+  -outform DER -out MOK.der \
+  -nodes -days 36500 \
+  -subj "/CN=lvda module signing/"
+
+sudo mokutil --import MOK.der
+sudo reboot
+```
+
+During the reboot, enroll the key in the MOK manager. After that, build and
+sign the module before installing it:
+
+```sh
+make -C module
+make -C module sign SIGN_KEY=$PWD/MOK.priv SIGN_CERT=$PWD/MOK.der
+sudo make -C module modules_install
+sudo depmod -a
+sudo modprobe lvda
+```
+
+`SIGN_CERT` may be a PEM or DER X.509 certificate accepted by the kernel
+`scripts/sign-file` helper. `SIGN_KEY` can also be a key reference supported by
+your kernel build's `sign-file` helper, such as a PKCS#11 URI on systems set up
+for hardware-backed keys.
+
+DKMS builds can also be signed, but the exact hook is distro-specific. Use the
+same enrolled key/certificate pair with your distro's DKMS signing mechanism if
+Secure Boot is enabled.
 
 ---
 

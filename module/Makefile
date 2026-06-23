@@ -7,6 +7,8 @@ PWD  := $(shell pwd)
 # so DKMS cross-builds pick the right compiler per kernel. Override with
 # `make LLVM=1` or `make LLVM=` (gcc).
 LLVM ?= $(shell grep -q '^CONFIG_CC_IS_CLANG=y' $(KDIR)/.config 2>/dev/null && echo 1)
+SIGN_HASH ?= sha256
+SIGN_FILE ?= $(KDIR)/scripts/sign-file
 
 all:
 	$(MAKE) -C $(KDIR) M=$(PWD) LLVM=$(LLVM) modules
@@ -16,6 +18,15 @@ clean:
 
 modules_install:
 	$(MAKE) -C $(KDIR) M=$(PWD) LLVM=$(LLVM) modules_install
+
+sign: all
+	@test -x "$(SIGN_FILE)" || { echo "ERROR: sign-file not found or not executable: $(SIGN_FILE)"; exit 1; }
+	@test -n "$(SIGN_KEY)" || { echo "ERROR: set SIGN_KEY=/path/to/private-key"; exit 1; }
+	@test -n "$(SIGN_CERT)" || { echo "ERROR: set SIGN_CERT=/path/to/x509-cert"; exit 1; }
+	@test -r "$(SIGN_KEY)" || { echo "ERROR: cannot read SIGN_KEY=$(SIGN_KEY)"; exit 1; }
+	@test -r "$(SIGN_CERT)" || { echo "ERROR: cannot read SIGN_CERT=$(SIGN_CERT)"; exit 1; }
+	"$(SIGN_FILE)" "$(SIGN_HASH)" "$(SIGN_KEY)" "$(SIGN_CERT)" lvda.ko
+	@echo "signed lvda.ko with $(SIGN_CERT)"
 
 # --- virtme-ng smoke test (no host root) ----------------------------------
 # Boots the running kernel image in a VM, loads the freshly-built module, and
@@ -41,4 +52,4 @@ vng-test: all
 compile_commands.json: all
 	$(MAKE) -C $(KDIR) M=$(PWD) LLVM=$(LLVM) compile_commands.json
 
-.PHONY: all clean modules_install vng-test compile_commands.json
+.PHONY: all clean modules_install sign vng-test compile_commands.json

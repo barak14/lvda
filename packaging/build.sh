@@ -16,7 +16,7 @@ reporoot=$(CDPATH= cd -- "$here/.." && pwd)         # repo root
 
 usage() {
 	cat <<EOF
-usage: ${0##*/} [-n|--dry-run] [arch|deb|rpm|nix]
+usage: ${0##*/} [-n|--dry-run] [arch|deb|rpm|nix|gentoo]
 
 Builds the native lvda package for the current system. With no format the
 format is auto-detected from /etc/os-release, then from the installed build
@@ -30,7 +30,7 @@ while [ $# -gt 0 ]; do
 	case "$1" in
 		-h|--help) usage; exit 0 ;;
 		-n|--dry-run) dry=1 ;;
-		arch|deb|rpm|nix) fmt="$1" ;;
+		arch|deb|rpm|nix|gentoo) fmt="$1" ;;
 		*) echo "error: unknown argument '$1'" >&2; usage >&2; exit 1 ;;
 	esac
 	shift
@@ -50,6 +50,7 @@ if [ -z "$fmt" ] && [ -r /etc/os-release ]; then
 			fedora|rhel|centos|rocky|almalinux|ol|amzn|mageia) fmt=rpm ;;
 			opensuse*|suse|sles|sled) fmt=rpm ;;
 			nixos) fmt=nix ;;
+			gentoo) fmt=gentoo ;;
 			*) continue ;;
 		esac
 		break
@@ -62,11 +63,12 @@ if [ -z "$fmt" ]; then
 	elif command -v dpkg-buildpackage >/dev/null 2>&1; then fmt=deb
 	elif command -v rpmbuild          >/dev/null 2>&1; then fmt=rpm
 	elif command -v nix               >/dev/null 2>&1; then fmt=nix
+	elif command -v ebuild            >/dev/null 2>&1; then fmt=gentoo
 	fi
 fi
 
 [ -n "$fmt" ] || {
-	echo "error: could not detect a packaging format; pass one of arch|deb|rpm|nix" >&2
+	echo "error: could not detect a packaging format; pass one of arch|deb|rpm|nix|gentoo" >&2
 	exit 1
 }
 
@@ -90,6 +92,11 @@ case "$fmt" in
 		tool=nix
 		build_cmd="cd \"$reporoot\" && nix build .#lvda"
 		install_hint="enable the NixOS module (see BUILD.md); the built module is ./result"
+		;;
+	gentoo)
+		tool=ebuild
+		build_cmd="\"$here/gentoo/makeebuild.sh\""
+		install_hint="sudo ebuild $here/gentoo/x11-drivers/lvda-dkms/*.ebuild merge"
 		;;
 esac
 

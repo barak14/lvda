@@ -42,3 +42,11 @@ compile_commands.json
 /result
 /result-*
 /.direnv/
+
+# local module signing keys
+/MOK.der
+/MOK.pem
+/MOK.priv
+/module/MOK.der
+/module/MOK.pem
+/module/MOK.priv
