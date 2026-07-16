@@ -5,6 +5,7 @@
 #include <drm/drm_connector.h>
 #include <drm/drm_crtc.h>
 #include <drm/drm_crtc_helper.h>
+#include <drm/drm_debugfs.h>
 #include <drm/drm_device.h>
 #include <drm/drm_drv.h>
 #include <drm/drm_edid.h>
@@ -25,6 +26,7 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/overflow.h>
+#include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 
@@ -58,6 +60,7 @@ static_assert(LVDA_EDID_RANGE_OFF_MAX_HFREQ == DRM_EDID_RANGE_OFFSET_MAX_HFREQ);
 /* One virtual monitor = one full {plane, CRTC, encoder, connector} chain. */
 struct lvda_monitor {
 	struct drm_plane primary;
+	struct drm_plane cursor;
 	struct drm_crtc crtc;
 	struct drm_encoder encoder;
 	struct drm_connector connector;
@@ -66,6 +69,12 @@ struct lvda_monitor {
 	bool active;
 	void *owner;	/* /dev/lvda file that added it; NULL = free slot */
 	u64 generation;
+	/* Last requested mode, exposed read-only via debugfs. */
+	u8 client_id[LVDA_CLIENT_ID_LEN];
+	u32 width;
+	u32 height;
+	u32 refresh_mhz;
+	u32 flags;
 };
 
 struct lvda_device {
@@ -87,7 +96,14 @@ static const u32 lvda_primary_formats[] = {
 	DRM_FORMAT_XBGR2101010,
 };
 
-static const u64 lvda_primary_modifiers[] = {
+static const u32 lvda_cursor_formats[] = {
+	DRM_FORMAT_ARGB8888,
+};
+
+/* Cursor max edge advertised to userspace via mode_config. */
+#define LVDA_CURSOR_MAX 256u
+
+static const u64 lvda_linear_modifiers[] = {
 	DRM_FORMAT_MOD_LINEAR,
 	DRM_FORMAT_MOD_INVALID,
 };
@@ -132,7 +148,8 @@ static int lvda_plane_atomic_check(struct drm_plane *plane,
 	return drm_atomic_helper_check_plane_state(plane_state, crtc_state,
 						   DRM_PLANE_NO_SCALING,
 						   DRM_PLANE_NO_SCALING,
-						   false, false);
+						   plane->type == DRM_PLANE_TYPE_CURSOR,
+						   false);
 }
 
 static int lvda_connector_get_modes(struct drm_connector *connector)
@@ -280,6 +297,55 @@ static const struct drm_driver lvda_drm_driver = {
 	.patchlevel = 0,
 };
 
+static int lvda_monitors_show(struct seq_file *m, void *unused)
+{
+	struct drm_debugfs_entry *entry = m->private;
+	struct lvda_device *ldev = to_lvda(entry->dev);
+	unsigned int i;
+
+	(void)unused;
+
+	seq_printf(m, "%-4s %-6s %-19s %-11s %-4s %-12s %-4s %s\n",
+		   "slot", "state", "mode", "flags", "gen", "connector",
+		   "edid", "client_id");
+
+	mutex_lock(&ldev->lock);
+	for (i = 0; i < ldev->n_monitors; i++) {
+		struct lvda_monitor *mon = &ldev->monitors[i];
+		char mode[24] = "-";
+		char flags[12] = "-";
+		char cid[2 * LVDA_CLIENT_ID_LEN + 1] = "-";
+
+		if (mon->active) {
+			snprintf(mode, sizeof(mode), "%ux%u@%u.%03u",
+				 mon->width, mon->height,
+				 mon->refresh_mhz / 1000,
+				 mon->refresh_mhz % 1000);
+			scnprintf(flags, sizeof(flags), "%s%s%s",
+				  mon->flags & LVDA_F_HDR ? "hdr" : "",
+				  (mon->flags & LVDA_F_ALL) == LVDA_F_ALL ?
+					  "," : "",
+				  mon->flags & LVDA_F_10BPC ? "10bpc" : "");
+			if (!flags[0])
+				strscpy(flags, "-", sizeof(flags));
+			snprintf(cid, sizeof(cid), "%*phN",
+				 (int)sizeof(mon->client_id), mon->client_id);
+		}
+
+		seq_printf(m, "%-4u %-6s %-19s %-11s %-4llu %-12s %-4u %s\n",
+			   i, mon->active ? "active" : "free", mode, flags,
+			   mon->generation, mon->connector.name,
+			   mon->edid_len, cid);
+	}
+	mutex_unlock(&ldev->lock);
+
+	return 0;
+}
+
+static const struct drm_debugfs_info lvda_debugfs_list[] = {
+	{ "monitors", lvda_monitors_show, 0 },
+};
+
 /* Reject a monitor name with non-printable bytes or one longer than the EDID
  * monitor-name descriptor holds. Empty is valid. */
 static int lvda_validate_name(const __u8 name[LVDA_NAME_FIELD_LEN])
@@ -344,6 +410,8 @@ static int lvda_init_mode_config(struct drm_device *drm)
 	drm->mode_config.max_width = LVDA_DIM_MAX;
 	drm->mode_config.max_height = LVDA_DIM_MAX;
 	drm->mode_config.preferred_depth = 24;
+	drm->mode_config.cursor_width = LVDA_CURSOR_MAX;
+	drm->mode_config.cursor_height = LVDA_CURSOR_MAX;
 	drm->mode_config.funcs = &lvda_mode_config_funcs;
 	drm->mode_config.helper_private = &lvda_mode_config_helpers;
 
@@ -360,7 +428,7 @@ static int lvda_init_monitor(struct lvda_device *ldev, unsigned int i)
 				       &lvda_plane_funcs,
 				       lvda_primary_formats,
 				       ARRAY_SIZE(lvda_primary_formats),
-				       lvda_primary_modifiers,
+				       lvda_linear_modifiers,
 				       DRM_PLANE_TYPE_PRIMARY,
 				       "lvda-primary-%u", i);
 	if (ret)
@@ -368,8 +436,21 @@ static int lvda_init_monitor(struct lvda_device *ldev, unsigned int i)
 
 	drm_plane_helper_add(&mon->primary, &lvda_plane_helper_funcs);
 
-	ret = drm_crtc_init_with_planes(drm, &mon->crtc, &mon->primary, NULL,
-					&lvda_crtc_funcs, "lvda-crtc-%u", i);
+	ret = drm_universal_plane_init(drm, &mon->cursor, BIT(i),
+				       &lvda_plane_funcs,
+				       lvda_cursor_formats,
+				       ARRAY_SIZE(lvda_cursor_formats),
+				       lvda_linear_modifiers,
+				       DRM_PLANE_TYPE_CURSOR,
+				       "lvda-cursor-%u", i);
+	if (ret)
+		return ret;
+
+	drm_plane_helper_add(&mon->cursor, &lvda_plane_helper_funcs);
+
+	ret = drm_crtc_init_with_planes(drm, &mon->crtc, &mon->primary,
+					&mon->cursor, &lvda_crtc_funcs,
+					"lvda-crtc-%u", i);
 	if (ret)
 		return ret;
 
@@ -467,6 +548,9 @@ int lvda_card_register(struct device *parent, unsigned int n_monitors)
 			goto err_put;
 	}
 
+	drm_debugfs_add_files(drm, lvda_debugfs_list,
+			      ARRAY_SIZE(lvda_debugfs_list));
+
 	ret = drm_dev_register(drm, 0);
 	if (ret)
 		goto err_put;
@@ -537,6 +621,11 @@ int lvda_monitor_add(void *owner, const struct lvda_add *req,
 
 	memcpy(mon->edid_bytes, edid_buf, len);
 	mon->edid_len = len;
+	memcpy(mon->client_id, req->client_id, sizeof(mon->client_id));
+	mon->width = req->width;
+	mon->height = req->height;
+	mon->refresh_mhz = req->refresh_mhz;
+	mon->flags = req->flags;
 	gen = ++mon->generation;
 	mon->active = true;
 	mon->owner = owner;

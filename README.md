@@ -53,6 +53,16 @@ cat /sys/class/drm/card0-Virtual-1/status   # connected | disconnected
 
 The card minor and connector name are also published to `/run/lvda/card`.
 
+For a whole-card view — every slot's requested mode, flags, EDID length, and
+the owning client id — read the driver's debugfs table (root, debugfs
+mounted):
+
+```sh
+cat /sys/kernel/debug/dri/0/monitors
+#   slot state  mode                flags       gen  connector    edid client_id
+#   0    active 2560x1440@120.000   hdr,10bpc   1    Virtual-1    128  deadbeef000000000000000000000000
+```
+
 ---
 
 ## How it fits into a streaming setup

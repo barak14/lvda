@@ -8,10 +8,10 @@
 CC      ?= cc
 CFLAGS  ?= -std=c11 -Wall -Wextra
 
-BINARIES := add_remove pool_cap fd_reap version edid_bytes
+BINARIES := add_remove pool_cap fd_reap version edid_bytes debugfs_monitors
 
 DRM_BINARIES := modifier_negotiation kmsgrab_roundtrip displayid_mode \
-		connector_caps
+		connector_caps cursor_plane
 
 HAVE_LIBDRM := $(shell pkg-config --exists libdrm 2>/dev/null && echo 1)
 
@@ -41,10 +41,14 @@ displayid_mode: displayid_mode.c ../../uapi/lvda.h
 connector_caps: connector_caps.c ../../uapi/lvda.h
 	$(CC) $(CFLAGS) $(DRM_CFLAGS) $< -o $@ $(DRM_LIBS)
 
+cursor_plane: cursor_plane.c ../../uapi/lvda.h
+	$(CC) $(CFLAGS) $(DRM_CFLAGS) $< -o $@ $(DRM_LIBS)
+
 run: $(BINARIES)
 	@for t in $(BINARIES); do ./$$t || exit $$?; done
 
 clean:
-	rm -f add_remove pool_cap fd_reap version edid_bytes $(DRM_BINARIES)
+	rm -f add_remove pool_cap fd_reap version edid_bytes debugfs_monitors \
+		$(DRM_BINARIES)
 
 .PHONY: all run clean
