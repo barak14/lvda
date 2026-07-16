@@ -28,6 +28,13 @@ kms_scanout_probe: kms_scanout_probe.c
 	$(CC) -std=c11 -Wall -Wextra kms_scanout_probe.c -o $@ \
 		$(shell pkg-config --cflags --libs libdrm)
 
+# Step-2 zero-copy probe: import a render-GPU dma-buf into lvda, scan it out,
+# capture + re-export it, and verify it is the same buffer (see
+# prime_import_probe.c). Needs libdrm + gbm and a real render GPU.
+prime_import_probe: prime_import_probe.c
+	$(CC) -std=c11 -Wall -Wextra prime_import_probe.c -o $@ \
+		$(shell pkg-config --cflags --libs libdrm gbm)
+
 run: test_edid
 	./test_edid
 
@@ -35,6 +42,6 @@ dump: test_edid
 	./test_edid --dump vectors
 
 clean:
-	rm -f test_edid gbm_probe kms_scanout_probe
+	rm -f test_edid gbm_probe kms_scanout_probe prime_import_probe
 
 .PHONY: run dump probe clean

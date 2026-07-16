@@ -34,8 +34,8 @@ sign: all
 KREL      ?= $(shell uname -r)
 KIMG      ?= $(firstword $(wildcard /usr/lib/modules/$(KREL)/vmlinuz /boot/vmlinuz-$(KREL) /lib/modules/$(KREL)/vmlinuz))
 TESTDIR   := $(abspath $(PWD)/../tests/userspace)
-VNG_TESTS := add_remove version pool_cap fd_reap edid_bytes debugfs_monitors modifier_negotiation kmsgrab_roundtrip displayid_mode connector_caps cursor_plane
-VNG_SCRIPT = cd $(PWD); uname -r; insmod ./lvda.ko || { echo INSMOD_FAILED; exit 1; }; echo INSMOD_OK; mount -t debugfs none /sys/kernel/debug 2>/dev/null || true; ls -l /dev/lvda; fail=0; for t in $(VNG_TESTS); do echo "=== $$t ==="; if "$(TESTDIR)/$$t"; then echo rc=0; else echo "rc=$$?"; fail=$$((fail+1)); fi; done; echo "=== dmesg ==="; dmesg | grep -iE "lvda|BUG|WARN|oops|call trace" | tail -20; rmmod lvda && echo RMMOD_OK; echo "RESULT: $$fail test(s) failed"; exit $$fail
+VNG_TESTS := add_remove version pool_cap fd_reap edid_bytes debugfs_monitors modifier_negotiation kmsgrab_roundtrip displayid_mode connector_caps cursor_plane prime_import
+VNG_SCRIPT = cd $(PWD); uname -r; insmod ./lvda.ko || { echo INSMOD_FAILED; exit 1; }; echo INSMOD_OK; mount -t debugfs none /sys/kernel/debug 2>/dev/null || true; modprobe vgem 2>/dev/null || true; ls -l /dev/lvda; fail=0; for t in $(VNG_TESTS); do echo "=== $$t ==="; if "$(TESTDIR)/$$t"; then echo rc=0; else echo "rc=$$?"; fail=$$((fail+1)); fi; done; echo "=== dmesg ==="; dmesg | grep -iE "lvda|BUG|WARN|oops|call trace" | tail -20; rmmod lvda && echo RMMOD_OK; echo "RESULT: $$fail test(s) failed"; exit $$fail
 
 vng-test: all
 	@command -v vng >/dev/null 2>&1 || { echo "ERROR: vng (virtme-ng) not found in PATH"; exit 1; }

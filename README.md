@@ -6,7 +6,10 @@
 refresh rate, and HDR mode on demand and hotplug-connects it. A streaming host
 (Sunshine / Apollo + Moonlight) can then serve a client at its native mode. The
 driver does no per-frame work — the compositor scans out to the virtual monitor
-and `kmsgrab` captures its framebuffer (LINEAR, zero-copy).
+and `kmsgrab` captures its framebuffer (LINEAR, zero-copy). The card also
+accepts PRIME-imported dma-bufs for scanout, so a compositor can place a
+render-GPU buffer on the virtual monitor directly — no CPU copy — and the
+captured framebuffer re-exports as that same GPU buffer.
 
 ---
 

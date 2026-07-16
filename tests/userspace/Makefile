@@ -11,7 +11,7 @@ CFLAGS  ?= -std=c11 -Wall -Wextra
 BINARIES := add_remove pool_cap fd_reap version edid_bytes debugfs_monitors
 
 DRM_BINARIES := modifier_negotiation kmsgrab_roundtrip displayid_mode \
-		connector_caps cursor_plane
+		connector_caps cursor_plane prime_import
 
 HAVE_LIBDRM := $(shell pkg-config --exists libdrm 2>/dev/null && echo 1)
 
@@ -42,6 +42,9 @@ connector_caps: connector_caps.c ../../uapi/lvda.h
 	$(CC) $(CFLAGS) $(DRM_CFLAGS) $< -o $@ $(DRM_LIBS)
 
 cursor_plane: cursor_plane.c ../../uapi/lvda.h
+	$(CC) $(CFLAGS) $(DRM_CFLAGS) $< -o $@ $(DRM_LIBS)
+
+prime_import: prime_import.c ../../uapi/lvda.h
 	$(CC) $(CFLAGS) $(DRM_CFLAGS) $< -o $@ $(DRM_LIBS)
 
 run: $(BINARIES)

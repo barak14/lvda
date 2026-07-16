@@ -30,7 +30,7 @@ User-facing docs: `README.md` (overview + `lvda-ctl` usage) and `BUILD.md`
 | `module/Kbuild` / `Makefile` | `obj-m := lvda.o`; OOT wrapper (`KDIR`, `LLVM`, `vng-test`). |
 | `uapi/lvda.h` | Userspace ABI — **single source of truth**. The module `#include`s it via `../uapi/lvda.h`. |
 | `tools/lvda-ctl/` | Userspace CLI (`up` / `down` / `status`); holds the `/dev/lvda` fd open as the liveness daemon. |
-| `tests/host/` | Host-built EDID conformance (`test_edid` compiles `lvda_edid.c` directly) + viability probes (`gbm_probe`, `kms_scanout_probe`); `vectors/` holds golden EDID bytes. |
+| `tests/host/` | Host-built EDID conformance (`test_edid` compiles `lvda_edid.c` directly) + viability probes (`gbm_probe`, `kms_scanout_probe`, `prime_import_probe`); `vectors/` holds golden EDID bytes. |
 | `tests/userspace/` | `/dev/lvda` integration tests; each skips with exit 0 when the device is absent. libdrm-based tests build only when `pkg-config` finds libdrm. |
 | `packaging/` | Shared drop-ins (`sysusers.d`, `tmpfiles.d`, `udev`, `modules-load.d`) + canonical `dkms.conf`, plus per-distro packagers under `arch/` (PKGBUILD), `debian/` (debhelper + dh-dkms + `makedeb.sh`), `rpm/` (`lvda-dkms.spec` + `makerpm.sh`), and `nix/` (derivations consumed by the repo-root `flake.nix`). |
 | `flake.nix` | Nix flake entry point — exposes `packages.lvda-ctl`, `packages.lvda` (kernel module), and `nixosModules.default`. Derivations live in `packaging/nix/`. |

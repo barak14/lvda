@@ -8,6 +8,7 @@
 #include <linux/module.h>
 #include <linux/miscdevice.h>
 #include <linux/fs.h>
+#include <linux/dma-mapping.h>
 #include <linux/platform_device.h>
 #include <linux/uaccess.h>
 #include <linux/err.h>
@@ -116,6 +117,11 @@ static int __init lvda_init(void)
 	lvda_parent = platform_device_register_simple("lvda", -1, NULL, 0);
 	if (IS_ERR(lvda_parent))
 		return PTR_ERR(lvda_parent);
+
+	/* Imported dma-bufs are DMA-mapped against this device. */
+	ret = dma_coerce_mask_and_coherent(&lvda_parent->dev, DMA_BIT_MASK(64));
+	if (ret)
+		goto err_parent;
 
 	ret = lvda_card_register(&lvda_parent->dev, lvda_max_monitors);
 	if (ret)
