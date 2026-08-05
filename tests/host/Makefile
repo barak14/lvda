@@ -35,6 +35,12 @@ prime_import_probe: prime_import_probe.c
 	$(CC) -std=c11 -Wall -Wextra prime_import_probe.c -o $@ \
 		$(shell pkg-config --cflags --libs libdrm gbm)
 
+# Direct-scanout probe: enumerate render-GPU format modifiers that lvda can
+# accept and emit the matching module option. Needs libdrm + gbm + EGL.
+scanout_modifiers_probe: scanout_modifiers_probe.c
+	$(CC) -std=c11 -Wall -Wextra scanout_modifiers_probe.c -o $@ \
+		$(shell pkg-config --cflags --libs libdrm gbm egl)
+
 run: test_edid
 	./test_edid
 
@@ -42,6 +48,7 @@ dump: test_edid
 	./test_edid --dump vectors
 
 clean:
-	rm -f test_edid gbm_probe kms_scanout_probe prime_import_probe
+	rm -f test_edid gbm_probe kms_scanout_probe prime_import_probe \
+		scanout_modifiers_probe
 
 .PHONY: run dump probe clean

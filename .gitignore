@@ -19,6 +19,7 @@ compile_commands.json
 /tests/host/gbm_probe
 /tests/host/kms_scanout_probe
 /tests/host/prime_import_probe
+/tests/host/scanout_modifiers_probe
 /tests/userspace/add_remove
 /tests/userspace/pool_cap
 /tests/userspace/fd_reap
@@ -26,6 +27,7 @@ compile_commands.json
 /tests/userspace/edid_bytes
 /tests/userspace/debugfs_monitors
 /tests/userspace/modifier_negotiation
+/tests/userspace/scanout_modifiers
 /tests/userspace/kmsgrab_roundtrip
 /tests/userspace/displayid_mode
 /tests/userspace/connector_caps

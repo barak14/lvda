@@ -108,6 +108,55 @@ static const u64 lvda_linear_modifiers[] = {
 	DRM_FORMAT_MOD_INVALID,
 };
 
+/*
+ * Extra format modifiers accepted for primary-plane scanout, injected at
+ * load time (modprobe.d). lvda never reads pixels, so it can scan out any
+ * layout the render GPU produces and the capture consumer can import; the
+ * driver just parrots the list into IN_FORMATS so a compositor offers and
+ * direct-scans tiled client buffers. Only single-plane layouts work: the
+ * generic fb_create path rejects fbs with more planes than the base format
+ * (e.g. AMD DCC with metadata planes). tests/host/scanout_modifiers_probe
+ * emits a ready-made options line for the installed render GPU.
+ */
+#define LVDA_MAX_SCANOUT_MODIFIERS 63u
+
+static unsigned long long lvda_scanout_modifiers[LVDA_MAX_SCANOUT_MODIFIERS];
+static unsigned int lvda_scanout_modifiers_count;
+module_param_array_named(scanout_modifiers, lvda_scanout_modifiers, ullong,
+			 &lvda_scanout_modifiers_count, 0444);
+MODULE_PARM_DESC(scanout_modifiers,
+		 "Extra DRM format modifiers accepted for primary-plane scanout (single-plane layouts only)");
+
+/* {LINEAR, deduped injected modifiers..., INVALID terminator}. */
+static u64 lvda_primary_modifiers[LVDA_MAX_SCANOUT_MODIFIERS + 2];
+
+static void lvda_build_primary_modifiers(void)
+{
+	unsigned int n = 0, i, j;
+
+	lvda_primary_modifiers[n++] = DRM_FORMAT_MOD_LINEAR;
+
+	for (i = 0; i < lvda_scanout_modifiers_count; i++) {
+		u64 mod = lvda_scanout_modifiers[i];
+
+		if (mod == DRM_FORMAT_MOD_LINEAR ||
+		    mod == DRM_FORMAT_MOD_INVALID) {
+			pr_warn("lvda: ignoring scanout_modifiers entry 0x%llx\n",
+				mod);
+			continue;
+		}
+
+		for (j = 0; j < n; j++) {
+			if (lvda_primary_modifiers[j] == mod)
+				break;
+		}
+		if (j == n)
+			lvda_primary_modifiers[n++] = mod;
+	}
+
+	lvda_primary_modifiers[n] = DRM_FORMAT_MOD_INVALID;
+}
+
 static void lvda_atomic_commit_tail(struct drm_atomic_state *state)
 {
 	struct drm_device *dev = state->dev;
@@ -428,7 +477,7 @@ static int lvda_init_monitor(struct lvda_device *ldev, unsigned int i)
 				       &lvda_plane_funcs,
 				       lvda_primary_formats,
 				       ARRAY_SIZE(lvda_primary_formats),
-				       lvda_linear_modifiers,
+				       lvda_primary_modifiers,
 				       DRM_PLANE_TYPE_PRIMARY,
 				       "lvda-primary-%u", i);
 	if (ret)
@@ -531,6 +580,8 @@ int lvda_card_register(struct device *parent, unsigned int n_monitors)
 	ret = lvda_init_mode_config(drm);
 	if (ret)
 		goto err_put;
+
+	lvda_build_primary_modifiers();
 
 	for (i = 0; i < n_monitors; i++) {
 		ret = lvda_init_monitor(ldev, i);

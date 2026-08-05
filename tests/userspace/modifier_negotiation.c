@@ -1,9 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
- * ADD a monitor, open the lvda DRM card, walk the primary plane IN_FORMATS
- * blob, and assert the modifier set is exactly {DRM_FORMAT_MOD_LINEAR} and
- * the format set contains the three formats XRGB8888, ARGB8888, XBGR2101010.
- * Skip with success when /dev/lvda or the lvda DRM card is absent.
+ * ADD a monitor, open the lvda DRM card, and walk each plane's IN_FORMATS
+ * blob. Primary planes must advertise DRM_FORMAT_MOD_LINEAR plus (at most
+ * once each) any modifiers injected via the scanout_modifiers module
+ * parameter; when LVDA_TEST_SCANOUT_MODIFIER is set the injected modifier
+ * must be present on every primary plane. Cursor planes must stay LINEAR
+ * only. Primary planes must offer the three formats XRGB8888, ARGB8888,
+ * XBGR2101010. Skip with success when /dev/lvda or the DRM card is absent.
  */
 
 #define _POSIX_C_SOURCE 200809L
@@ -26,6 +29,15 @@
 
 int main(void)
 {
+	const char *env = getenv("LVDA_TEST_SCANOUT_MODIFIER");
+	uint64_t env_mod = 0;
+	int env_mod_set = 0;
+
+	if (env && env[0]) {
+		env_mod = strtoull(env, NULL, 0);
+		env_mod_set = 1;
+	}
+
 	int lvda_fd = open("/dev/lvda", O_RDWR);
 	if (lvda_fd < 0) {
 		if (errno == ENOENT || errno == EACCES) {
@@ -120,8 +132,10 @@ int main(void)
 		}
 		drmModeFreeObjectProperties(props);
 
-		if (plane_type != DRM_PLANE_TYPE_PRIMARY)
+		if (plane_type != DRM_PLANE_TYPE_PRIMARY &&
+		    plane_type != DRM_PLANE_TYPE_CURSOR)
 			continue;
+		int is_cursor = (plane_type == DRM_PLANE_TYPE_CURSOR);
 
 		if (!have_blob)
 			continue;
@@ -145,15 +159,53 @@ int main(void)
 			(const struct drm_format_modifier *)
 				((const char *)fb + fb->modifiers_offset);
 
-		/* Every advertised modifier must be LINEAR. */
+		/* LINEAR always; cursor LINEAR-only; no duplicates; the
+		 * injected modifier present on primary when the harness
+		 * says one was passed to the module. */
+		int has_linear = 0, has_env = 0, dup = 0;
+
 		for (uint32_t m = 0; m < fb->count_modifiers; m++) {
-			if (mods[m].modifier != DRM_FORMAT_MOD_LINEAR) {
+			uint64_t mod = mods[m].modifier;
+
+			if (mod == DRM_FORMAT_MOD_LINEAR)
+				has_linear = 1;
+			if (env_mod_set && mod == env_mod)
+				has_env = 1;
+			if (is_cursor && mod != DRM_FORMAT_MOD_LINEAR) {
 				fprintf(stderr,
-					"plane %u: non-LINEAR modifier "
+					"cursor plane %u: non-LINEAR modifier "
 					"0x%llx\n", plane_id,
-					(unsigned long long)mods[m].modifier);
+					(unsigned long long)mod);
 				rc = 1;
 			}
+			for (uint32_t k = m + 1; k < fb->count_modifiers; k++) {
+				if (mods[k].modifier == mod)
+					dup = 1;
+			}
+		}
+		if (!has_linear) {
+			fprintf(stderr, "plane %u: LINEAR missing\n", plane_id);
+			rc = 1;
+		}
+		if (dup) {
+			fprintf(stderr, "plane %u: duplicate modifier\n",
+				plane_id);
+			rc = 1;
+		}
+		if (!is_cursor && env_mod_set && !has_env) {
+			fprintf(stderr,
+				"plane %u: injected modifier 0x%llx missing\n",
+				plane_id, (unsigned long long)env_mod);
+			rc = 1;
+		}
+
+		if (is_cursor) {
+			printf("cursor plane %u: %u formats, %u modifiers\n",
+			       plane_id, fb->count_formats,
+			       fb->count_modifiers);
+			checked++;
+			drmModeFreePropertyBlob(blob);
+			continue;
 		}
 
 		/* Required formats must all be present. */
@@ -189,7 +241,7 @@ int main(void)
 			rc = 1;
 		}
 
-		printf("plane %u: %u formats, %u modifiers (LINEAR only)\n",
+		printf("primary plane %u: %u formats, %u modifiers\n",
 		       plane_id, fb->count_formats, fb->count_modifiers);
 		checked++;
 		drmModeFreePropertyBlob(blob);

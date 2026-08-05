@@ -74,3 +74,8 @@ The virtual card behaves like a real GPU with hotpluggable outputs. A Wayland
 compositor that supports multi-GPU (KWin, wlroots / Hyprland) adopts the card
 at startup, and when a monitor is added a new output appears at the client's
 exact mode. Point your capture (`kmsgrab`) at that output and encode it.
+
+For direct scanout, build and run `tests/host/scanout_modifiers_probe` on the
+render GPU. It filters the GPU's format modifiers to those lvda can accept and
+prints the exact `options lvda scanout_modifiers=...` line for a modprobe.d
+configuration; reload the module after applying it.
