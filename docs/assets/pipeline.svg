@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 430" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d1117"/>
+      <stop offset="1" stop-color="#101a2e"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8b98a9"/>
+    </marker>
+    <marker id="arrCyan" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#22d3ee"/>
+    </marker>
+    <marker id="arrViolet" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#a78bfa"/>
+    </marker>
+    <marker id="arrGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#4ade80"/>
+    </marker>
+  </defs>
+
+  <rect width="960" height="430" rx="14" fill="url(#bg)"/>
+  <rect x="0.5" y="0.5" width="959" height="429" rx="13.5" fill="none" stroke="#263043"/>
+
+  <!-- kernel band -->
+  <rect x="24" y="278" width="912" height="128" rx="10" fill="#0a0f1a" stroke="#263043"/>
+  <text x="44" y="304" font-size="12" fill="#5b6778" letter-spacing="2">KERNEL</text>
+
+  <!-- userspace label -->
+  <text x="44" y="52" font-size="12" fill="#5b6778" letter-spacing="2">USERSPACE</text>
+
+  <!-- Moonlight client -->
+  <g>
+    <rect x="44" y="120" width="172" height="64" rx="9" fill="#161d2b" stroke="#2b3648" stroke-width="1.5"/>
+    <text x="130" y="147" font-size="15" font-weight="600" fill="#e6edf3" text-anchor="middle">Moonlight</text>
+    <text x="130" y="168" font-size="12" fill="#8b98a9" text-anchor="middle">client device</text>
+  </g>
+
+  <!-- Sunshine -->
+  <g>
+    <rect x="330" y="120" width="192" height="64" rx="9" fill="#161d2b" stroke="#2b3648" stroke-width="1.5"/>
+    <text x="426" y="147" font-size="15" font-weight="600" fill="#e6edf3" text-anchor="middle">Sunshine / Apollo</text>
+    <text x="426" y="168" font-size="12" fill="#8b98a9" text-anchor="middle">streaming host</text>
+  </g>
+
+  <!-- lvda-ctl -->
+  <g>
+    <rect x="640" y="64" width="160" height="58" rx="9" fill="#161d2b" stroke="#2b3648" stroke-width="1.5"/>
+    <text x="720" y="88" font-family="ui-monospace, Menlo, monospace" font-size="14" font-weight="600" fill="#e6edf3" text-anchor="middle">lvda-ctl up</text>
+    <text x="720" y="108" font-size="11.5" fill="#8b98a9" text-anchor="middle">holds fd = liveness</text>
+  </g>
+
+  <!-- compositor -->
+  <g>
+    <rect x="330" y="196" width="192" height="58" rx="9" fill="#161d2b" stroke="#2b3648" stroke-width="1.5"/>
+    <text x="426" y="220" font-size="15" font-weight="600" fill="#e6edf3" text-anchor="middle">Wayland compositor</text>
+    <text x="426" y="240" font-size="12" fill="#8b98a9" text-anchor="middle">adopts the new output</text>
+  </g>
+
+  <!-- lvda control device -->
+  <g>
+    <rect x="640" y="316" width="160" height="58" rx="9" fill="#131c2e" stroke="#2b3648" stroke-width="1.5"/>
+    <text x="720" y="340" font-family="ui-monospace, Menlo, monospace" font-size="13.5" font-weight="600" fill="#e6edf3" text-anchor="middle">/dev/lvda</text>
+    <text x="720" y="360" font-size="11.5" fill="#8b98a9" text-anchor="middle">control ioctls</text>
+  </g>
+
+  <!-- lvda card -->
+  <g>
+    <rect x="300" y="316" width="252" height="58" rx="9" fill="#131c2e" stroke="url(#accent)" stroke-width="2"/>
+    <text x="426" y="340" font-family="ui-monospace, Menlo, monospace" font-size="13.5" font-weight="600" fill="#e6edf3" text-anchor="middle">lvda &#8212; /dev/dri/cardN</text>
+    <text x="426" y="360" font-size="11.5" fill="#9fb3d9" text-anchor="middle">Virtual&#8209;1 hotplugged at the exact mode</text>
+  </g>
+
+  <!-- flows -->
+  <!-- client -> sunshine -->
+  <path d="M216 138 H326" fill="none" stroke="#8b98a9" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="271" y="128" font-size="11.5" fill="#8b98a9" text-anchor="middle">connect</text>
+  <text x="271" y="142" font-family="ui-monospace, Menlo, monospace" font-size="10.5" fill="#5b6778" text-anchor="middle" dy="14">2560&#215;1440@144 HDR</text>
+
+  <!-- sunshine -> lvda-ctl -->
+  <path d="M522 138 Q600 138 636 100" fill="none" stroke="#fbbf24" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="596" y="112" font-size="11.5" fill="#fbbf24" text-anchor="middle">prep command</text>
+
+  <!-- lvda-ctl -> /dev/lvda -->
+  <path d="M720 122 V312" fill="none" stroke="#fbbf24" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="731" y="200" font-family="ui-monospace, Menlo, monospace" font-size="10.5" fill="#fbbf24">LVDA_IOC_ADD</text>
+
+  <!-- /dev/lvda -> card -->
+  <path d="M640 345 H556" fill="none" stroke="#fbbf24" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="598" y="336" font-size="10.5" fill="#fbbf24" text-anchor="middle">light up slot</text>
+
+  <!-- card -> compositor (hotplug) -->
+  <path d="M380 316 Q368 290 380 258" fill="none" stroke="#a78bfa" stroke-width="1.6" marker-end="url(#arrViolet)"/>
+  <text x="322" y="290" font-size="11" fill="#a78bfa" text-anchor="middle">hotplug event</text>
+
+  <!-- compositor -> card (scanout) -->
+  <path d="M470 258 Q482 290 470 312" fill="none" stroke="#4ade80" stroke-width="1.6" marker-end="url(#arrGreen)"/>
+  <text x="546" y="290" font-size="11" fill="#4ade80" text-anchor="middle">scanout / PRIME</text>
+
+  <!-- card -> sunshine (capture) -->
+  <path d="M300 345 Q120 345 120 300 L120 220 Q120 200 160 190 Q240 172 326 166" fill="none" stroke="#22d3ee" stroke-width="1.8" marker-end="url(#arrCyan)"/>
+  <text x="120" y="252" font-size="11.5" fill="#22d3ee" text-anchor="middle">kmsgrab</text>
+  <text x="120" y="267" font-family="ui-monospace, Menlo, monospace" font-size="10" fill="#22d3ee" text-anchor="middle">GetFB2 &#8594; DMA&#8209;BUF</text>
+
+  <!-- sunshine -> client (stream) -->
+  <path d="M326 176 H216" fill="none" stroke="#22d3ee" stroke-width="1.8" marker-end="url(#arrCyan)"/>
+  <text x="271" y="194" font-size="11.5" fill="#22d3ee" text-anchor="middle">video stream</text>
+
+  <!-- zero-copy note -->
+  <text x="480" y="416" font-size="11" fill="#5b6778" text-anchor="middle">no per-frame work in the driver &#183; the captured framebuffer is the compositor&#8217;s own buffer</text>
+</svg>

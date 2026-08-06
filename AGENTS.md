@@ -15,8 +15,10 @@ A monitor is owned by the `/dev/lvda` file that added it and is reaped when
 that file closes — the open fd is the liveness signal (no heartbeat, no
 watchdog).
 
-User-facing docs: `README.md` (overview + `lvda-ctl` usage) and `BUILD.md`
-(kernel requirements, install, load, permissions, uninstall).
+User-facing docs: `README.md` (overview + quick start), `BUILD.md` (kernel
+requirements, install, load, permissions, uninstall), and `docs/`
+(`architecture.md`, `lvda-ctl.md`, `sunshine.md`, `troubleshooting.md`,
+`validation.md`; `assets/` holds the README SVGs).
 
 ## Layout
 
@@ -34,6 +36,7 @@ User-facing docs: `README.md` (overview + `lvda-ctl` usage) and `BUILD.md`
 | `tests/userspace/` | `/dev/lvda` integration tests; each skips with exit 0 when the device is absent. libdrm-based tests build only when `pkg-config` finds libdrm. |
 | `packaging/` | Shared drop-ins (`sysusers.d`, `tmpfiles.d`, `udev`, `modules-load.d`) + canonical `dkms.conf`, plus per-distro packagers under `arch/` (PKGBUILD), `debian/` (debhelper + dh-dkms + `makedeb.sh`), `rpm/` (`lvda-dkms.spec` + `makerpm.sh`), and `nix/` (derivations consumed by the repo-root `flake.nix`). |
 | `flake.nix` | Nix flake entry point — exposes `packages.lvda-ctl`, `packages.lvda` (kernel module), and `nixosModules.default`. Derivations live in `packaging/nix/`. |
+|`docs/`|User guides: architecture deep dive, `lvda-ctl` reference, Sunshine/Apollo integration, troubleshooting, validation results; `assets/` SVG art used by `README.md`.|
 | `sync-and-probe.sh` | Push the driver to a VM over SSH, build + load it, run a viability probe. |
 
 ## Build & Test
