@@ -29,9 +29,22 @@
 #include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/string.h>
+#include <linux/version.h>
 
 #include "lvda.h"
 #include "lvda_edid.h"
+
+/*
+ * Linux 7.2 split the atomic transaction object: the KMS callbacks that used to
+ * take `struct drm_atomic_state *` now take `struct drm_atomic_commit *`, and
+ * `struct drm_atomic_state` no longer exists. Alias the transaction type so one
+ * source tree builds against both the 6.x LTS and >=7.2 kernels.
+ */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
+typedef struct drm_atomic_commit lvda_atomic_txn;
+#else
+typedef struct drm_atomic_state lvda_atomic_txn;
+#endif
 
 /* EDID format constants in lvda_edid.h mirror <drm/drm_edid.h>; verify they
  * match. */
@@ -157,7 +170,7 @@ static void lvda_build_primary_modifiers(void)
 	lvda_primary_modifiers[n] = DRM_FORMAT_MOD_INVALID;
 }
 
-static void lvda_atomic_commit_tail(struct drm_atomic_state *state)
+static void lvda_atomic_commit_tail(lvda_atomic_txn *state)
 {
 	struct drm_device *dev = state->dev;
 
@@ -171,14 +184,14 @@ static void lvda_atomic_commit_tail(struct drm_atomic_state *state)
 }
 
 static void lvda_plane_atomic_update(struct drm_plane *plane,
-				      struct drm_atomic_state *state)
+				      lvda_atomic_txn *state)
 {
 	(void)plane;
 	(void)state;
 }
 
 static int lvda_plane_atomic_check(struct drm_plane *plane,
-				    struct drm_atomic_state *state)
+				    lvda_atomic_txn *state)
 {
 	struct drm_plane_state *plane_state;
 	struct drm_crtc_state *crtc_state;
@@ -536,9 +549,14 @@ static int lvda_init_monitor(struct lvda_device *ldev, unsigned int i)
 		return ret;
 	drm_connector_set_vrr_capable_property(&mon->connector, true);
 
+	/* Linux 7.2 made this attach unconditional and dropped the error path. */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
+	drm_connector_attach_hdr_output_metadata_property(&mon->connector);
+#else
 	ret = drm_connector_attach_hdr_output_metadata_property(&mon->connector);
 	if (ret)
 		return ret;
+#endif
 
 	ret = drm_mode_create_dp_colorspace_property(&mon->connector, 0);
 	if (ret)
