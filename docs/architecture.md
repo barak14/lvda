@@ -40,6 +40,14 @@ flowchart LR
 - **Connector** — `DRM_MODE_CONNECTOR_VIRTUAL`, named `Virtual-1` …
   `Virtual-N`. Reports `disconnected` until a monitor is up; while up, its
   probe returns exactly one mode — the requested one.
+- **CRTC vblank** (Linux ≥ 7.0) — emulated with the DRM vblank timer.
+  With `VRR_ENABLED` off, a timer fires at the mode's refresh and flips
+  complete on the next tick. With it on, the periodic timer stops and each
+  flip produces one vblank: immediately if a full mode period has passed
+  since the previous one, otherwise when it does. Flips are never delayed,
+  only capped at the mode's refresh. A synthetic counter keeps sequence
+  numbers at exactly +1 per flip. Ported from Vibeshine's VKMS fork
+  (GPL-2.0+). Older kernels complete every flip immediately (fake vblank).
 
 ## Monitor lifecycle
 
@@ -125,6 +133,27 @@ Capture (Sunshine `kms`, ffmpeg `kmsgrab`) reads the live scanout buffer via
 `drmModeGetFB2()` → DMA-BUF and hands it to the encoder. It needs
 `CAP_SYS_ADMIN`, not DRM master — it never conflicts with the running
 compositor.
+
+### Presentation events (protocol ≥ 2.3)
+
+Polling `GetFB2` on a timer grabs whatever buffer is current, so a frame
+waits on average half a capture interval and timer drift duplicates or skips
+frames. Two driver-private ioctls on the lvda DRM card (`uapi/lvda.h`, also
+`CAP_SYS_ADMIN`) let a capturer follow the display instead:
+
+- `DRM_IOCTL_LVDA_WAIT_PRESENT` blocks (up to 1 s) until the CRTC's
+  presentation sequence moves past the caller's last one. The sequence
+  advances once per completed commit touching that monitor — after the flip
+  completes, i.e. on the emulated vblank — and carries a `CLOCK_MONOTONIC`
+  timestamp.
+- `DRM_IOCTL_LVDA_GET_FRAME` exports the newest presented primary
+  framebuffer: sequence, timestamp, format, modifier, pitches/offsets and
+  close-on-exec DMA-BUF fds, all describing the same presentation. An
+  imported render-GPU buffer comes back as its original DMA-BUF (zero-copy).
+  `EMPTY` means the CRTC is off.
+
+Missed sequences are coalesced: a slow consumer always gets the newest
+frame. The design follows Vibeshine's VKMS fork (`WAIT_PRESENT`/`GET_FRAME`).
 
 ## Observability
 

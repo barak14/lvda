@@ -26,7 +26,7 @@ Distro/kernel detail for the VM probes lives in
 | Suite | Runs where | Checks |
 |---|---|---|
 | `tests/host/test_edid` | Any host | EDID conformance against golden vectors — the synthesizer is deterministic |
-| `tests/userspace/` (`make -C module vng-test`) | VM with the module loaded | Add/remove, fd reaping, pool cap, EDID bytes, DisplayID modes, connector caps (VRR, HDR metadata, BT.2020, max bpc), cursor plane, `kmsgrab` round-trip, PRIME import (vgem → lvda), scanout modifiers, debugfs table, ABI version |
+| `tests/userspace/` (`make -C module vng-test`) | VM with the module loaded | Add/remove, fd reaping, pool cap, EDID bytes, DisplayID modes, connector caps (VRR, HDR metadata, BT.2020, max bpc), cursor plane, `kmsgrab` round-trip, PRIME import (vgem → lvda), scanout modifiers, debugfs table, ABI version, vblank pacing (fixed-rate with VRR off; capped one-vblank-per-flip with VRR on), presentation events (`WAIT_PRESENT` wakes on flips and times out when idle; `GET_FRAME` exports the scanned-out buffer, including a vgem-imported one as its own DMA-BUF) |
 | `tests/host/*_probe` | Any machine running lvda; the last two need a real GPU | Software GBM/EGL (`gbm_probe`), atomic modeset + capture (`kms_scanout_probe`), GPU buffer import (`prime_import_probe`), modifier filtering (`scanout_modifiers_probe`) |
 
 `sync-and-probe.sh <ssh-alias> [probe]` pushes the tree to a VM, builds and

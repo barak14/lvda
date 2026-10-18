@@ -99,8 +99,11 @@ that multi-GPU-copies from the render GPU. This is not fixable from the lvda
 side: the pairing decision is keyed on kernel bus types, and exposing a fake
 render node makes KWin match the device to itself — still software.
 
-While streaming, also set the virtual output's VRR policy to *never* if your
-desktop enables adaptive sync by default.
+On Linux ≥ 7.0 the virtual output emulates a real vblank and supports VRR:
+with adaptive sync *always*, a flip is presented immediately unless it would
+exceed the mode's refresh, so leaving VRR on is the lowest-latency choice.
+On older kernels lvda has no vblank pacing; there, set the virtual output's
+VRR policy to *never* if your desktop enables adaptive sync by default.
 
 ## Verifying the zero-copy path
 

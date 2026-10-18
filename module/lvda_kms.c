@@ -20,7 +20,14 @@
 #include <drm/drm_plane.h>
 #include <drm/drm_plane_helper.h>
 #include <drm/drm_probe_helper.h>
+#include <linux/atomic.h>
 #include <linux/bits.h>
+#include <linux/dma-fence.h>
+#include <linux/hrtimer.h>
+#include <linux/ktime.h>
+#include <linux/minmax.h>
+#include <linux/spinlock.h>
+#include <linux/timekeeping.h>
 #include <linux/err.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -30,6 +37,15 @@
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/version.h>
+#include <linux/capability.h>
+#include <linux/fcntl.h>
+#include <linux/fdtable.h>
+#include <linux/jiffies.h>
+#include <linux/wait.h>
+#include <drm/drm_file.h>
+#include <drm/drm_framebuffer.h>
+#include <drm/drm_ioctl.h>
+#include <drm/drm_prime.h>
 
 #include "lvda.h"
 #include "lvda_edid.h"
@@ -44,6 +60,20 @@
 typedef struct drm_atomic_commit lvda_atomic_txn;
 #else
 typedef struct drm_atomic_state lvda_atomic_txn;
+#endif
+
+/*
+ * Linux 7.0 added the DRM vblank-timer helpers. With them, lvda emulates a
+ * real vblank (fixed-rate when VRR is off, one capped vblank per flip when VRR
+ * is on). Older kernels keep the original fake-vblank behaviour, where every
+ * flip completes immediately.
+ */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+#define LVDA_HAS_VBLANK_HELPER 1
+#include <drm/drm_vblank.h>
+#include <drm/drm_vblank_helper.h>
+#else
+#define LVDA_HAS_VBLANK_HELPER 0
 #endif
 
 /* EDID format constants in lvda_edid.h mirror <drm/drm_edid.h>; verify they
@@ -88,6 +118,27 @@ struct lvda_monitor {
 	u32 height;
 	u32 refresh_mhz;
 	u32 flags;
+	/*
+	 * Presentation tracking for LVDA_DRM_WAIT_PRESENT / LVDA_DRM_GET_FRAME.
+	 * present_sequence advances once per completed commit touching this
+	 * monitor; present_fb holds a reference to the newest presented
+	 * primary framebuffer (NULL while the CRTC is off).
+	 */
+	spinlock_t present_lock;
+	wait_queue_head_t present_waitq;
+	atomic64_t present_sequence;
+	u64 present_timestamp_ns;		/* under present_lock */
+	struct drm_framebuffer *present_fb;	/* under present_lock */
+#if LVDA_HAS_VBLANK_HELPER
+	/* Serializes synthetic vblank generation (periodic and VRR timers). */
+	spinlock_t vblank_lock;
+	/* One-shot timer enforcing the mode's maximum refresh under VRR. */
+	struct hrtimer vrr_hrtimer;
+	/* Raw counter for get_vblank_counter: +1 per generated vblank. */
+	atomic64_t synthetic_vblank_counter;
+	/* CLOCK_MONOTONIC ns of the last generated vblank; 0 = none yet. */
+	atomic64_t vrr_vblank_timestamp_ns;
+#endif
 };
 
 struct lvda_device {
@@ -99,6 +150,7 @@ struct lvda_device {
 
 #define to_lvda(dev)	  container_of(dev, struct lvda_device, drm)
 #define to_monitor(conn)  container_of(conn, struct lvda_monitor, connector)
+#define crtc_to_monitor(c) container_of(c, struct lvda_monitor, crtc)
 
 /* The single persistent card. */
 static struct lvda_device *lvda_card;
@@ -170,6 +222,58 @@ static void lvda_build_primary_modifiers(void)
 	lvda_primary_modifiers[n] = DRM_FORMAT_MOD_INVALID;
 }
 
+static_assert(LVDA_DRM_IOCTL_BASE == DRM_IOCTL_BASE);
+static_assert(LVDA_DRM_COMMAND_BASE == DRM_COMMAND_BASE);
+
+/*
+ * Publish a presentation on every monitor this commit touched. Runs from the
+ * commit tail once the flip has completed, so the sequence advances when the
+ * new frame is actually on screen (vblank tick, or VRR-capped flip).
+ */
+static void lvda_publish_presentations(lvda_atomic_txn *state)
+{
+	struct lvda_device *ldev = to_lvda(state->dev);
+	unsigned int i;
+
+	for (i = 0; i < ldev->n_monitors; i++) {
+		struct lvda_monitor *mon = &ldev->monitors[i];
+		struct drm_crtc_state *crtc_state =
+			drm_atomic_get_new_crtc_state(state, &mon->crtc);
+		struct drm_plane_state *primary =
+			drm_atomic_get_new_plane_state(state, &mon->primary);
+		struct drm_framebuffer *old_fb = NULL, *new_fb = NULL;
+		bool update_fb = false;
+
+		if (!crtc_state && !primary &&
+		    !drm_atomic_get_new_plane_state(state, &mon->cursor))
+			continue;
+
+		if (crtc_state && !crtc_state->active) {
+			update_fb = true;
+		} else if (primary) {
+			update_fb = true;
+			if (primary->fb && primary->visible &&
+			    primary->crtc == &mon->crtc) {
+				new_fb = primary->fb;
+				drm_framebuffer_get(new_fb);
+			}
+		}
+
+		spin_lock(&mon->present_lock);
+		if (update_fb) {
+			old_fb = mon->present_fb;
+			mon->present_fb = new_fb;
+		}
+		mon->present_timestamp_ns = ktime_get_ns();
+		atomic64_inc(&mon->present_sequence);
+		spin_unlock(&mon->present_lock);
+
+		if (old_fb)
+			drm_framebuffer_put(old_fb);
+		wake_up_interruptible_all(&mon->present_waitq);
+	}
+}
+
 static void lvda_atomic_commit_tail(lvda_atomic_txn *state)
 {
 	struct drm_device *dev = state->dev;
@@ -179,9 +283,358 @@ static void lvda_atomic_commit_tail(lvda_atomic_txn *state)
 	drm_atomic_helper_commit_modeset_enables(dev, state);
 	drm_atomic_helper_fake_vblank(state);
 	drm_atomic_helper_commit_hw_done(state);
+#if LVDA_HAS_VBLANK_HELPER
+	/*
+	 * The CRTC's vblank emulation is the only pacing point: flip_done
+	 * completes when the armed event is delivered. Waiting for a vblank
+	 * count change instead would stall commits for up to 100 ms under VRR,
+	 * where no vblank fires without a flip.
+	 */
+	drm_atomic_helper_wait_for_flip_done(dev, state);
+#else
 	drm_atomic_helper_wait_for_vblanks(dev, state);
+#endif
+	lvda_publish_presentations(state);
 	drm_atomic_helper_cleanup_planes(dev, state);
 }
+
+static struct lvda_monitor *lvda_find_monitor(struct drm_device *dev,
+					      struct drm_file *file, u32 crtc_id)
+{
+	struct drm_crtc *crtc = drm_crtc_find(dev, file, crtc_id);
+
+	return crtc ? crtc_to_monitor(crtc) : NULL;
+}
+
+static int lvda_wait_present_ioctl(struct drm_device *dev, void *data,
+				   struct drm_file *file)
+{
+	struct lvda_wait_present *req = data;
+	struct lvda_monitor *mon;
+	u64 requested = req->sequence;
+
+	if (req->reserved || req->timeout_ms > LVDA_PRESENT_MAX_TIMEOUT_MS)
+		return -EINVAL;
+	if (!capable(CAP_SYS_ADMIN))
+		return -EACCES;
+	mon = lvda_find_monitor(dev, file, req->crtc_id);
+	if (!mon)
+		return -ENOENT;
+
+	if (req->timeout_ms) {
+		long ret = wait_event_interruptible_timeout(
+			mon->present_waitq,
+			(u64)atomic64_read(&mon->present_sequence) != requested,
+			msecs_to_jiffies(req->timeout_ms));
+
+		if (ret < 0)
+			return ret;
+	}
+
+	spin_lock(&mon->present_lock);
+	req->sequence = atomic64_read(&mon->present_sequence);
+	req->timestamp_ns = mon->present_timestamp_ns;
+	spin_unlock(&mon->present_lock);
+	req->flags = req->sequence != requested ? LVDA_PRESENT_CHANGED
+						: LVDA_PRESENT_TIMEOUT;
+	return 0;
+}
+
+/* Install a DMA-BUF fd for obj in the caller. An imported object (the
+ * compositor's render-GPU buffer) yields its original DMA-BUF. */
+static int lvda_export_obj_fd(struct drm_device *dev, struct drm_file *file,
+			      struct drm_gem_object *obj, int *fd)
+{
+	u32 handle;
+	int ret;
+
+	if (!obj)
+		return -EINVAL;
+	ret = drm_gem_handle_create(file, obj, &handle);
+	if (ret)
+		return ret;
+	ret = drm_gem_prime_handle_to_fd(dev, file, handle,
+					 DRM_CLOEXEC | DRM_RDWR, fd);
+	drm_gem_handle_delete(file, handle);
+	return ret;
+}
+
+static int lvda_get_frame_ioctl(struct drm_device *dev, void *data,
+				struct drm_file *file)
+{
+	struct lvda_frame *req = data;
+	struct drm_framebuffer *fb;
+	struct lvda_monitor *mon;
+	unsigned int i, n;
+	int ret = 0;
+
+	for (i = 0; i < ARRAY_SIZE(req->reserved); i++)
+		if (req->reserved[i])
+			return -EINVAL;
+	if (!capable(CAP_SYS_ADMIN))
+		return -EACCES;
+	mon = lvda_find_monitor(dev, file, req->crtc_id);
+	if (!mon)
+		return -ENOENT;
+
+	req->flags = 0;
+	req->modifier = 0;
+	req->width = req->height = req->fourcc = req->plane_count = 0;
+	for (i = 0; i < LVDA_FRAME_MAX_PLANES; i++) {
+		req->dma_buf_fds[i] = -1;
+		req->pitches[i] = 0;
+		req->offsets[i] = 0;
+	}
+
+	spin_lock(&mon->present_lock);
+	req->sequence = atomic64_read(&mon->present_sequence);
+	req->timestamp_ns = mon->present_timestamp_ns;
+	fb = mon->present_fb;
+	if (fb)
+		drm_framebuffer_get(fb);
+	spin_unlock(&mon->present_lock);
+
+	if (!fb) {
+		req->flags = LVDA_FRAME_EMPTY;
+		return 0;
+	}
+
+	n = fb->format->num_planes;
+	if (!n || n > LVDA_FRAME_MAX_PLANES) {
+		ret = -EINVAL;
+		goto out;
+	}
+	for (i = 0; i < n; i++) {
+		ret = lvda_export_obj_fd(dev, file, drm_gem_fb_get_obj(fb, i),
+					 &req->dma_buf_fds[i]);
+		if (ret) {
+			req->dma_buf_fds[i] = -1;
+			goto out;
+		}
+		req->pitches[i] = fb->pitches[i];
+		req->offsets[i] = fb->offsets[i];
+	}
+	req->flags = LVDA_FRAME_READY;
+	req->width = fb->width;
+	req->height = fb->height;
+	req->fourcc = fb->format->format;
+	req->modifier = (fb->flags & DRM_MODE_FB_MODIFIERS) ?
+				fb->modifier : DRM_FORMAT_MOD_INVALID;
+	req->plane_count = n;
+
+out:
+	drm_framebuffer_put(fb);
+	if (ret) {
+		for (i = 0; i < LVDA_FRAME_MAX_PLANES; i++) {
+			if (req->dma_buf_fds[i] >= 0)
+				close_fd(req->dma_buf_fds[i]);
+			req->dma_buf_fds[i] = -1;
+		}
+	}
+	return ret;
+}
+
+static const struct drm_ioctl_desc lvda_ioctls[] = {
+	DRM_IOCTL_DEF_DRV(LVDA_WAIT_PRESENT, lvda_wait_present_ioctl, 0),
+	DRM_IOCTL_DEF_DRV(LVDA_GET_FRAME, lvda_get_frame_ioctl, 0),
+};
+
+static void lvda_present_cleanup(struct drm_device *dev, void *data)
+{
+	struct lvda_monitor *mon = data;
+
+	(void)dev;
+	if (mon->present_fb)
+		drm_framebuffer_put(mon->present_fb);
+	mon->present_fb = NULL;
+}
+
+#if LVDA_HAS_VBLANK_HELPER
+/*
+ * Vblank emulation ported from Vibeshine's VKMS fork (vibeshine-drm:
+ * vkms_crtc.c and vibeshine_drm_vrr.h, GPL-2.0+, Copyright (c) 2026 Chase
+ * Payne; derived from the upstream VKMS driver).
+ *
+ * VRR off: the DRM vblank timer fires at the mode's refresh and flips
+ * complete on the next tick.
+ *
+ * VRR on: the periodic timer is stopped. Each flip generates exactly one
+ * vblank, immediately if at least one mode period has passed since the
+ * previous vblank, otherwise when that period elapses. Flips are never
+ * delayed beyond the mode's maximum refresh rate. A synthetic raw counter
+ * keeps DRM from inferring zero or several vblanks from the irregular
+ * timestamps.
+ */
+
+/* Earliest legal presentation time for a VRR flip. A zero previous timestamp
+ * permits the first presentation immediately; saturation keeps a stale value
+ * from wrapping into the past. */
+static u64 lvda_vrr_deadline_ns(u64 previous_ns, u64 now_ns, u64 period_ns)
+{
+	u64 deadline_ns;
+
+	if (!previous_ns || !period_ns)
+		return now_ns;
+	if (previous_ns > U64_MAX - period_ns)
+		return U64_MAX;
+
+	deadline_ns = previous_ns + period_ns;
+	return deadline_ns > now_ns ? deadline_ns : now_ns;
+}
+
+/* handle_vblank_timeout for the DRM vblank timer, and the VRR timer body.
+ * Also called from atomic_flush (process context), hence irqsave. */
+static bool lvda_crtc_handle_vblank(struct drm_crtc *crtc)
+{
+	struct lvda_monitor *mon = crtc_to_monitor(crtc);
+	unsigned long flags;
+	bool fence_cookie, ret;
+
+	fence_cookie = dma_fence_begin_signalling();
+	spin_lock_irqsave(&mon->vblank_lock, flags);
+	atomic64_set(&mon->vrr_vblank_timestamp_ns, ktime_get_ns());
+	atomic64_inc(&mon->synthetic_vblank_counter);
+	ret = drm_crtc_handle_vblank(crtc);
+	spin_unlock_irqrestore(&mon->vblank_lock, flags);
+	dma_fence_end_signalling(fence_cookie);
+
+	return ret;
+}
+
+static enum hrtimer_restart lvda_vrr_vblank_fire(struct hrtimer *timer)
+{
+	struct lvda_monitor *mon = container_of(timer, struct lvda_monitor,
+						vrr_hrtimer);
+
+	lvda_crtc_handle_vblank(&mon->crtc);
+	return HRTIMER_NORESTART;
+}
+
+static void lvda_schedule_vrr_vblank(struct drm_crtc *crtc)
+{
+	struct drm_vblank_crtc *vblank = drm_crtc_vblank_crtc(crtc);
+	struct lvda_monitor *mon = crtc_to_monitor(crtc);
+	u64 now_ns = ktime_get_ns();
+	u64 period_ns = max_t(int, READ_ONCE(vblank->framedur_ns), 0);
+	u64 deadline_ns;
+
+	deadline_ns = lvda_vrr_deadline_ns(
+		atomic64_read(&mon->vrr_vblank_timestamp_ns), now_ns, period_ns);
+	if (deadline_ns <= now_ns) {
+		lvda_crtc_handle_vblank(crtc);
+		return;
+	}
+
+	hrtimer_start(&mon->vrr_hrtimer, ns_to_ktime(deadline_ns),
+		      HRTIMER_MODE_ABS);
+}
+
+static u32 lvda_crtc_get_vblank_counter(struct drm_crtc *crtc)
+{
+	return (u32)atomic64_read(
+		&crtc_to_monitor(crtc)->synthetic_vblank_counter);
+}
+
+static bool lvda_crtc_get_vblank_timestamp(struct drm_crtc *crtc,
+					   int *max_error,
+					   ktime_t *vblank_time,
+					   bool in_vblank_irq)
+{
+	u64 timestamp_ns;
+
+	if (!READ_ONCE(crtc->state->vrr_enabled))
+		return drm_crtc_vblank_helper_get_vblank_timestamp_from_timer(
+			crtc, max_error, vblank_time, in_vblank_irq);
+
+	/* Under VRR the real generation time is the vblank time. */
+	timestamp_ns = atomic64_read(
+		&crtc_to_monitor(crtc)->vrr_vblank_timestamp_ns);
+	if (!timestamp_ns)
+		return false;
+	*max_error = 0;
+	*vblank_time = ns_to_ktime(timestamp_ns);
+	return true;
+}
+
+static void lvda_crtc_atomic_flush(struct drm_crtc *crtc,
+				   lvda_atomic_txn *state)
+{
+	struct lvda_monitor *mon = crtc_to_monitor(crtc);
+	struct drm_crtc_state *old_state =
+		drm_atomic_get_old_crtc_state(state, crtc);
+	struct drm_crtc_state *new_state =
+		drm_atomic_get_new_crtc_state(state, crtc);
+	struct drm_pending_vblank_event *event;
+	bool vrr_disabled = old_state && old_state->vrr_enabled &&
+			    !new_state->vrr_enabled;
+	bool vrr_flip = false;
+
+	spin_lock_irq(&crtc->dev->event_lock);
+	event = new_state->event;
+	new_state->event = NULL;
+	if (event) {
+		if (drm_crtc_vblank_get(crtc) == 0) {
+			drm_crtc_arm_vblank_event(crtc, event);
+			vrr_flip = new_state->vrr_enabled;
+		} else {
+			drm_crtc_send_vblank_event(crtc, event);
+		}
+	}
+	spin_unlock_irq(&crtc->dev->event_lock);
+
+	/*
+	 * Adaptive sync removes the fixed cadence, not the mode's maximum
+	 * refresh. Stop the periodic timer (drm_crtc_vblank_get() may just
+	 * have started it) and generate one capped vblank per flip; restore
+	 * the periodic timer when VRR turns off.
+	 */
+	if (new_state->vrr_enabled && old_state && old_state->active)
+		drm_crtc_vblank_cancel_timer(crtc);
+	if (vrr_flip) {
+		lvda_schedule_vrr_vblank(crtc);
+	} else if (vrr_disabled) {
+		hrtimer_cancel(&mon->vrr_hrtimer);
+		atomic64_set(&mon->vrr_vblank_timestamp_ns, 0);
+		if (new_state->active)
+			drm_crtc_vblank_start_timer(crtc);
+	}
+}
+
+static void lvda_crtc_atomic_enable(struct drm_crtc *crtc,
+				    lvda_atomic_txn *state)
+{
+	struct lvda_monitor *mon = crtc_to_monitor(crtc);
+
+	(void)state;
+	drm_crtc_vblank_on(crtc);
+
+	/* drm_crtc_vblank_on() may start the periodic timer; VRR doesn't
+	 * use it. */
+	if (crtc->state->vrr_enabled) {
+		atomic64_set(&mon->vrr_vblank_timestamp_ns, ktime_get_ns());
+		drm_crtc_vblank_cancel_timer(crtc);
+	}
+}
+
+static void lvda_crtc_atomic_disable(struct drm_crtc *crtc,
+				     lvda_atomic_txn *state)
+{
+	struct lvda_monitor *mon = crtc_to_monitor(crtc);
+
+	(void)state;
+	hrtimer_cancel(&mon->vrr_hrtimer);
+	atomic64_set(&mon->vrr_vblank_timestamp_ns, 0);
+	drm_crtc_vblank_off(crtc);
+}
+
+static void lvda_vrr_timer_cleanup(struct drm_device *dev, void *data)
+{
+	struct lvda_monitor *mon = data;
+
+	(void)dev;
+	hrtimer_cancel(&mon->vrr_hrtimer);
+}
+#endif /* LVDA_HAS_VBLANK_HELPER */
 
 static void lvda_plane_atomic_update(struct drm_plane *plane,
 				      lvda_atomic_txn *state)
@@ -271,10 +724,22 @@ static const struct drm_crtc_funcs lvda_crtc_funcs = {
 	.page_flip = drm_atomic_helper_page_flip,
 	.atomic_duplicate_state = drm_atomic_helper_crtc_duplicate_state,
 	.atomic_destroy_state = drm_atomic_helper_crtc_destroy_state,
+#if LVDA_HAS_VBLANK_HELPER
+	.get_vblank_counter = lvda_crtc_get_vblank_counter,
+	.enable_vblank = drm_crtc_vblank_helper_enable_vblank_timer,
+	.disable_vblank = drm_crtc_vblank_helper_disable_vblank_timer,
+	.get_vblank_timestamp = lvda_crtc_get_vblank_timestamp,
+#endif
 };
 
 static const struct drm_crtc_helper_funcs lvda_crtc_helper_funcs = {
 	.atomic_check = drm_crtc_helper_atomic_check,
+#if LVDA_HAS_VBLANK_HELPER
+	.atomic_flush = lvda_crtc_atomic_flush,
+	.atomic_enable = lvda_crtc_atomic_enable,
+	.atomic_disable = lvda_crtc_atomic_disable,
+	.handle_vblank_timeout = lvda_crtc_handle_vblank,
+#endif
 };
 
 static const struct drm_encoder_funcs lvda_encoder_funcs = {
@@ -352,6 +817,8 @@ static const struct drm_driver lvda_drm_driver = {
 	DRM_GEM_SHMEM_DRIVER_OPS,
 	.dumb_create = lvda_dumb_create,
 	.fops = &lvda_fops,
+	.ioctls = lvda_ioctls,
+	.num_ioctls = ARRAY_SIZE(lvda_ioctls),
 	.name = "lvda",
 	.desc = "LVDA virtual display",
 	.major = 0,
@@ -518,6 +985,28 @@ static int lvda_init_monitor(struct lvda_device *ldev, unsigned int i)
 
 	drm_crtc_helper_add(&mon->crtc, &lvda_crtc_helper_funcs);
 
+#if LVDA_HAS_VBLANK_HELPER
+	spin_lock_init(&mon->vblank_lock);
+	atomic64_set(&mon->synthetic_vblank_counter, 0);
+	atomic64_set(&mon->vrr_vblank_timestamp_ns, 0);
+	hrtimer_setup(&mon->vrr_hrtimer, lvda_vrr_vblank_fire,
+		      CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
+	ret = drmm_add_action_or_reset(drm, lvda_vrr_timer_cleanup, mon);
+	if (ret)
+		return ret;
+#endif
+
+	spin_lock_init(&mon->present_lock);
+	init_waitqueue_head(&mon->present_waitq);
+	atomic64_set(&mon->present_sequence, 0);
+	mon->present_timestamp_ns = 0;
+	mon->present_fb = NULL;
+	/* Registered after drmm_mode_config_init(), so this runs before the
+	 * mode-config cleanup that would flag a still-referenced fb. */
+	ret = drmm_add_action_or_reset(drm, lvda_present_cleanup, mon);
+	if (ret)
+		return ret;
+
 	/* VRR_ENABLED atomic CRTC property. */
 	drm_object_attach_property(&mon->crtc.base,
 				   drm->mode_config.prop_vrr_enabled, 0);
@@ -606,6 +1095,14 @@ int lvda_card_register(struct device *parent, unsigned int n_monitors)
 		if (ret)
 			goto err_put;
 	}
+
+#if LVDA_HAS_VBLANK_HELPER
+	/* get_vblank_counter reports a full 32-bit synthetic counter. */
+	drm->max_vblank_count = U32_MAX;
+	ret = drm_vblank_init(drm, n_monitors);
+	if (ret)
+		goto err_put;
+#endif
 
 	drm_mode_config_reset(drm);
 

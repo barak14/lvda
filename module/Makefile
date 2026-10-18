@@ -34,7 +34,7 @@ sign: all
 KREL      ?= $(shell uname -r)
 KIMG      ?= $(firstword $(wildcard /usr/lib/modules/$(KREL)/vmlinuz /boot/vmlinuz-$(KREL) /lib/modules/$(KREL)/vmlinuz))
 TESTDIR   := $(abspath $(PWD)/../tests/userspace)
-VNG_TESTS := add_remove version pool_cap fd_reap edid_bytes debugfs_monitors modifier_negotiation kmsgrab_roundtrip displayid_mode connector_caps cursor_plane prime_import scanout_modifiers
+VNG_TESTS := add_remove version pool_cap fd_reap edid_bytes debugfs_monitors modifier_negotiation kmsgrab_roundtrip displayid_mode connector_caps cursor_plane prime_import scanout_modifiers vblank_pacing present_frame
 # The duplicated 0x0f...01 entry proves the module dedups the injected list;
 # LVDA_TEST_SCANOUT_MODIFIER tells the tests which modifier to expect.
 VNG_MOD_ARGS := scanout_modifiers=0x0f00000000000001,0x0f00000000000002,0x0f00000000000001

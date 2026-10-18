@@ -82,7 +82,7 @@ missing daemon is success.
 
 ```
 $ lvda-ctl status
-module: loaded, protocol 2.2.0
+module: loaded, protocol 2.3.0
 daemons:
   pid=1234   alive=yes pidfile=/run/lvda/sunshine.pid
 ```

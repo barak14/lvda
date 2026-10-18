@@ -58,3 +58,5 @@ compile_commands.json
 /module/MOK.der
 /module/MOK.pem
 /module/MOK.priv
+/tests/userspace/vblank_pacing
+/tests/userspace/present_frame
